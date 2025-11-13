@@ -648,10 +648,10 @@ class HybridWingDetector:
             roi_probs = prob_map[y0:y1, x0:x1]
             if roi_probs.shape[-1] >= 2:
                 background = roi_probs[..., 1]
-                refined_roi &= background < 0.65
+                refined_roi &= (background < 0.65)
             if roi_probs.shape[-1] >= 3:
                 vein_prob = roi_probs[..., 2]
-                refined_roi &= vein_prob < 0.88
+                refined_roi &= (vein_prob < 0.88)
             if roi_probs.shape[-1] >= 4:
                 intervein_prob = roi_probs[..., 3]
                 refined_roi |= (intervein_prob > 0.35) & roi_mask
@@ -668,7 +668,7 @@ class HybridWingDetector:
 
             if np.any(roi_mask):
                 bright_support = roi_img > np.percentile(roi_img[roi_mask], 60)
-                refined_roi |= bright_support & roi_votes > adaptive_threshold
+                refined_roi |= bright_support & (roi_votes > adaptive_threshold)
 
         refined_roi = morphology.binary_closing(refined_roi, morphology.disk(4))
         refined_roi = morphology.binary_opening(refined_roi, morphology.disk(2))
@@ -707,13 +707,20 @@ class HybridWingDetector:
         if prob_map is not None and prob_map.ndim >= 3:
             if prob_map.shape[-1] >= 1:
                 trichome_prob = prob_map[..., 0]
-                support_map |= trichome_prob > 0.32
+                smoothed_trichome = gaussian_filter(trichome_prob, sigma=1.2)
+                if np.any(mask):
+                    local_reference = float(np.percentile(trichome_prob[mask], 35))
+                else:
+                    local_reference = 0.22
+                adaptive_trichome_cutoff = max(0.22, local_reference * 0.9)
+                support_map |= (trichome_prob > adaptive_trichome_cutoff)
+                support_map |= (smoothed_trichome > adaptive_trichome_cutoff * 0.9)
             if prob_map.shape[-1] >= 2:
                 background_prob = prob_map[..., 1]
-                removal_map |= background_prob > 0.6
+                removal_map |= (background_prob > 0.6)
             if prob_map.shape[-1] >= 4:
                 intervein_prob = prob_map[..., 3]
-                support_map |= intervein_prob > 0.33
+                support_map |= (intervein_prob > 0.33)
 
         contrast_support = None
         if raw_img is not None:
