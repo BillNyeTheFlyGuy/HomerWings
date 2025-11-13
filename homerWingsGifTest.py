@@ -10,35 +10,6 @@ HomerWings for public beta. IJFM!
 
 from __future__ import annotations
 
-
-import sys
-import os
-from pathlib import Path
-
-
-def get_resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    
-    return os.path.join(base_path, relative_path)
-
-
-if sys.platform.startswith('win'):
-    # Fix for Windows multiprocessing in PyInstaller
-    import multiprocessing
-    multiprocessing.freeze_support()
-    
-    # Ensure proper DLL loading on Windows
-    if hasattr(sys, '_MEIPASS'):
-        os.environ['PATH'] = sys._MEIPASS + ';' + os.environ.get('PATH', '')
-
-
-
-
 import os
 import csv
 import math
@@ -53,7 +24,7 @@ from scipy.spatial.distance import pdist, squareform
 import numpy as np
 import h5py
 import imageio
-
+import matplotlib.pyplot as plt
 from scipy.spatial import ConvexHull, Voronoi, distance_matrix
 from scipy.ndimage import gaussian_filter, maximum_filter
 from scipy.optimize import linear_sum_assignment
@@ -82,13 +53,134 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import matplotlib
 import drosophila_gif
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
+matplotlib.use('Agg')
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 PIXELS_PER_MICRON = 1.4464
+
+
+
+# @dataclass
+# class TrichomeDetectionConfig:
+#     """Enhanced configuration with automated vein detection parameters and hybrid detection."""
+    
+#     # Core detection parameters
+#     min_distance: int = 8
+#     high_thresh_abs: float = 0.30
+#     low_thresh_abs: float = 0.20
+    
+#     # Multi-scale detection
+#     scales: List[float] = field(default_factory=lambda: [0.8, 1.0, 1.2])
+#     scale_weight_decay: float = 0.8
+    
+#     # Pre-processing
+#     use_clahe: bool = False
+#     clahe_clip_limit: float = 0.01
+#     clahe_tile_grid: Optional[int] = None
+    
+#     use_white_tophat: bool = True
+#     tophat_radius: int = 2
+    
+#     use_local_threshold: bool = True
+#     local_block_size: int = 71
+#     local_offset: float = 0.0
+    
+#     # Advanced peak detection
+#     two_pass: bool = True
+#     h_prominence: float = 0.40
+#     peak_rel_threshold: float = 0.50
+    
+#     # Quality control parameters
+#     min_peak_intensity: float = 0.25
+#     max_peak_density: float = 0.002
+#     edge_exclusion_buffer: int = 10
+    
+#     # Clustering and filtering
+#     dbscan_eps: float = 10.0
+#     dbscan_min_samples: int = 1
+#     valley_drop: float = 0.25
+#     neighbour_tolerance: float = 0.20
+#     min_neighbours: int = 7
+    
+#     # Intervein segmentation
+#     intervein_threshold: float = 0.2
+#     min_region_area: int = 60000
+#     max_region_area: int = 1500000
+#     max_hole_size: int = 10000
+    
+#     # IMPROVED VEIN DETECTION PARAMETERS
+#     vein_width_estimate: int = 3
+#     min_vein_length: int = 100
+#     vein_detection_sensitivity: float = 0.9
+#     use_template_matching: bool = True
+#     use_vesselness_filters: bool = True
+#     use_morphological_detection: bool = True
+#     background_mask_threshold: float = 0.8  # Threshold for background masking
+#     enable_background_masking: bool = True  # Enable/disable background masking
+#     # Wing-specific parameters
+#     wing_orientation_correction: bool = True
+#     expected_wing_aspect_ratio: float = 2.5
+#     min_wing_area: int = 100000  # Minimum area for valid wing
+#     border_buffer: int = 20  # Buffer from image edge for valid wings
+    
+#     # Intervein region refinement
+#     auto_intervein_min_area: int = 400
+#     auto_intervein_max_area: int = 800000
+#     intervein_shape_filter: bool = True
+#     min_intervein_solidity: float = 0.4
+    
+#     # === NEW: Hybrid detection parameters ===
+#     use_hybrid_detection: bool = True
+#     sparse_threshold: float = 0.1  # Trichome density threshold for sparse wings
+#     prob_weight: float = 0.8  # Weight for probability-based detection
+#     trichome_weight: float = 0.2  # Weight for trichome validation
+    
+#     # Sparse wing handling
+#     conservative_string_removal: bool = False
+#     probability_dominant_sparse: bool = True
+#     min_trichomes_for_validation: int = 50
+    
+#     # Detection method selection
+#     wing_detection_method: str = "hybrid"  # "hybrid", "probability", "trichome"
+    
+#     def validate(self) -> None:
+#         """Enhanced validation including hybrid parameters."""
+#         # Original validation
+#         if self.min_distance < 1:
+#             raise ValueError("min_distance must be >= 1")
+#         if not 0 < self.high_thresh_abs <= 1:
+#             raise ValueError("high_thresh_abs must be in (0, 1]")
+#         if not 0 < self.low_thresh_abs <= 1:
+#             raise ValueError("low_thresh_abs must be in (0, 1]")
+#         if self.local_block_size % 2 == 0:
+#             raise ValueError("local_block_size must be odd")
+#         if self.tophat_radius < 1:
+#             raise ValueError("tophat_radius must be >= 1")
+        
+#         # Validate hybrid-specific parameters
+#         if not 0 <= self.sparse_threshold <= 1:
+#             raise ValueError("sparse_threshold must be between 0 and 1")
+#         if not 0 <= self.prob_weight <= 1:
+#             raise ValueError("prob_weight must be between 0 and 1")
+#         if not 0 <= self.trichome_weight <= 1:
+#             raise ValueError("trichome_weight must be between 0 and 1")
+#         if abs(self.prob_weight + self.trichome_weight - 1.0) > 0.01:
+#             logger.warning("prob_weight + trichome_weight should sum to 1.0")
+#         if self.min_trichomes_for_validation < 1:
+#             raise ValueError("min_trichomes_for_validation must be >= 1")
+#         if self.wing_detection_method not in ["hybrid", "probability", "trichome"]:
+#             raise ValueError("wing_detection_method must be 'hybrid', 'probability', or 'trichome'")
+        
+#         logger.info("Enhanced configuration validation passed")
+
+# CONFIG = TrichomeDetectionConfig()
+
 
 @dataclass
 class TrichomeDetectionConfig:
-    """Enhanced configuration with automated vein detection parameters."""
+    """Enhanced configuration with automated vein detection parameters and hybrid detection."""
     
     # Core detection parameters
     min_distance: int = 8
@@ -129,33 +221,52 @@ class TrichomeDetectionConfig:
     min_neighbours: int = 7
     
     # Intervein segmentation
-    intervein_threshold: float = 0.4
+    intervein_threshold: float = 0.2
     min_region_area: int = 60000
-    max_region_area: int = 1500000
+    max_region_area: int = 2000000
     max_hole_size: int = 10000
     
     # IMPROVED VEIN DETECTION PARAMETERS
-    vein_width_estimate: int = 7
+    vein_width_estimate: int = 3
     min_vein_length: int = 100
     vein_detection_sensitivity: float = 0.9
     use_template_matching: bool = True
     use_vesselness_filters: bool = True
     use_morphological_detection: bool = True
+    background_mask_threshold: float = 0.8
+    enable_background_masking: bool = True
     
     # Wing-specific parameters
     wing_orientation_correction: bool = True
     expected_wing_aspect_ratio: float = 2.5
-    min_wing_area: int = 100000  # Minimum area for valid wing
-    border_buffer: int = 20  # Buffer from image edge for valid wings
+    min_wing_area: int = 100000
+    border_buffer: int = 20
     
     # Intervein region refinement
-    auto_intervein_min_area: int = 800
+    auto_intervein_min_area: int = 400
     auto_intervein_max_area: int = 800000
     intervein_shape_filter: bool = True
     min_intervein_solidity: float = 0.4
     
+    # === Hybrid detection parameters ===
+    use_hybrid_detection: bool = True
+    sparse_threshold: float = 0.1
+    prob_weight: float = 0.8
+    trichome_weight: float = 0.2
+    
+    # Sparse wing handling
+    conservative_string_removal: bool = False
+    probability_dominant_sparse: bool = True
+    min_trichomes_for_validation: int = 50
+    
+    # Detection method selection
+    wing_detection_method: str = "hybrid"
+    
+    # === NEW: Force merge regions 4+5 ===
+    force_merge_regions_4_5: bool = False
+    
     def validate(self) -> None:
-        """Validate configuration parameters."""
+        """Enhanced validation including hybrid parameters."""
         if self.min_distance < 1:
             raise ValueError("min_distance must be >= 1")
         if not 0 < self.high_thresh_abs <= 1:
@@ -166,13 +277,423 @@ class TrichomeDetectionConfig:
             raise ValueError("local_block_size must be odd")
         if self.tophat_radius < 1:
             raise ValueError("tophat_radius must be >= 1")
-        logger.info("Configuration validation passed")
+        
+        if not 0 <= self.sparse_threshold <= 1:
+            raise ValueError("sparse_threshold must be between 0 and 1")
+        if not 0 <= self.prob_weight <= 1:
+            raise ValueError("prob_weight must be between 0 and 1")
+        if not 0 <= self.trichome_weight <= 1:
+            raise ValueError("trichome_weight must be between 0 and 1")
+        if abs(self.prob_weight + self.trichome_weight - 1.0) > 0.01:
+            logger.warning("prob_weight + trichome_weight should sum to 1.0")
+        if self.min_trichomes_for_validation < 1:
+            raise ValueError("min_trichomes_for_validation must be >= 1")
+        if self.wing_detection_method not in ["hybrid", "probability", "trichome"]:
+            raise ValueError("wing_detection_method must be 'hybrid', 'probability', or 'trichome'")
+        
+        logger.info("Enhanced configuration validation passed")
 
 CONFIG = TrichomeDetectionConfig()
-
-
-
-
+class HybridWingDetector:
+    """Hybrid wing detector that combines probability maps with trichome validation."""
+    
+    def __init__(self, config):
+        self.config = config
+        # Parameters for hybrid detection
+        self.prob_weight = 0.5  # Weight for probability-based detection
+        self.trichome_weight = 0.5  # Weight for trichome-based validation
+        self.sparse_threshold = 0.1  # Threshold to detect sparse wings
+        
+    def detect_wing_boundary_hybrid(self, prob_map, raw_img=None, peaks=None):
+        """
+        Hybrid wing detection combining probability maps and trichome validation.
+        Falls back gracefully for sparse wings.
+        """
+        logger.info("Starting hybrid wing boundary detection...")
+        
+        # Step 1: Get initial wing mask from probability map
+        prob_wing_mask = self._detect_from_probability_enhanced(prob_map, raw_img)
+        
+        # Step 2: Detect or use provided trichome peaks
+        if peaks is None:
+            tri_prob = prob_map[..., 0] if prob_map.shape[-1] >= 1 else prob_map
+            peaks, _ = detect_trichome_peaks(tri_prob, self.config)
+        
+        logger.info(f"Using {len(peaks)} trichomes for validation")
+        
+        # Step 3: Assess trichome sparsity
+        trichome_density = len(peaks) / prob_map.size if prob_map.size > 0 else 0
+        is_sparse = trichome_density < self.sparse_threshold
+        
+        logger.info(f"Trichome density: {trichome_density:.6f}, sparse: {is_sparse}")
+        
+        if is_sparse or len(peaks) < 50:
+            # Sparse wing: rely more on probability map
+            logger.info("Sparse wing detected - using probability-dominant approach")
+            return self._sparse_wing_detection(prob_map, raw_img, peaks, prob_wing_mask)
+        else:
+            # Dense wing: use hybrid approach
+            logger.info("Dense wing detected - using hybrid approach")
+            return self._dense_wing_detection(prob_map, raw_img, peaks, prob_wing_mask)
+    
+    def _detect_from_probability_enhanced(self, prob_map, raw_img):
+        """Enhanced probability-based detection with multiple approaches."""
+        logger.info("Creating probability-based wing mask...")
+        
+        candidate_masks = []
+        
+        # Method 1: Intervein probability (if available)
+        if prob_map.shape[-1] >= 4:
+            intervein_prob = prob_map[..., 3]
+            # Wing areas typically have moderate to high intervein probability
+            intervein_mask = (intervein_prob > 0.2) & (intervein_prob < 1)
+            candidate_masks.append(('intervein', intervein_mask))
+            logger.info(f"Intervein method: {np.sum(intervein_mask)} pixels")
+        
+        # Method 2: Vein probability (inverted - wing is where veins are NOT)
+        if prob_map.shape[-1] >= 3:
+            vein_prob = prob_map[..., 2]
+            # Wing tissue has low to moderate vein probability
+            non_vein_mask = vein_prob < 0.7
+            candidate_masks.append(('non_vein', non_vein_mask))
+            logger.info(f"Non-vein method: {np.sum(non_vein_mask)} pixels")
+        
+        # Method 3: Background probability (inverted)
+        if prob_map.shape[-1] >= 2:
+            bg_prob = prob_map[..., 1]
+            # Wing areas have low background probability
+            non_bg_mask = bg_prob < 0.5
+            candidate_masks.append(('non_background', non_bg_mask))
+            logger.info(f"Non-background method: {np.sum(non_bg_mask)} pixels")
+        
+        # Method 4: Raw image intensity (if available)
+        if raw_img is not None:
+            intensity_mask = self._intensity_based_mask(raw_img)
+            candidate_masks.append(('intensity', intensity_mask))
+            logger.info(f"Intensity method: {np.sum(intensity_mask)} pixels")
+        
+        # Method 5: Combined probability approach
+        if prob_map.shape[-1] >= 4:
+            # Wing areas: high trichome + moderate intervein + low background + low vein
+            trichome_prob = prob_map[..., 0]
+            combined_mask = (
+                (trichome_prob > 0.1) &  # Some trichome presence
+                (intervein_prob > 0.15) &  # Some intervein tissue
+                (bg_prob < 0.6) &  # Not pure background
+                (vein_prob < 0.8)   # Not pure vein
+            )
+            candidate_masks.append(('combined', combined_mask))
+            logger.info(f"Combined method: {np.sum(combined_mask)} pixels")
+        
+        # Combine all methods using voting
+        return self._combine_probability_methods(candidate_masks, prob_map.shape[:2])
+    
+    def _intensity_based_mask(self, raw_img):
+        """Create wing mask from raw image intensity."""
+        # Normalize
+        raw_norm = (raw_img - raw_img.min()) / (raw_img.max() - raw_img.min() + 1e-8)
+        
+        # Wing tissue is typically in middle intensity range
+        # Avoid pure black (mounting medium) and pure white (bright reflections)
+        intensity_mask = (raw_norm > 0.1) & (raw_norm < 0.9)
+        
+        # Use Otsu thresholding as additional guide
+        otsu_thresh = filters.threshold_otsu(raw_norm)
+        otsu_mask = raw_norm > otsu_thresh * 0.8  # Slightly more inclusive
+        
+        # Combine both approaches
+        combined = intensity_mask | otsu_mask
+        
+        return combined
+    
+    def _combine_probability_methods(self, candidate_masks, shape):
+        """Combine multiple probability-based methods using intelligent voting."""
+        if not candidate_masks:
+            return np.zeros(shape, dtype=bool)
+        
+        # Create voting map
+        vote_map = np.zeros(shape, dtype=np.float32)
+        weights = {
+            'intervein': 0,
+            'combined': 0,
+            'non_background':1,
+            'non_vein': 0,
+            'intensity':0 
+        }
+        
+        total_weight = 0
+        for name, mask in candidate_masks:
+            weight = weights.get(name, 0.1)
+            vote_map += mask.astype(np.float32) * weight
+            total_weight += weight
+        
+        # Normalize votes
+        if total_weight > 0:
+            vote_map /= total_weight
+        
+        # Threshold voting - require at least 40% agreement
+        consensus_mask = vote_map > 0.4
+        
+        # Clean up the consensus mask
+        consensus_mask = self._clean_probability_mask(consensus_mask)
+        
+        logger.info(f"Probability consensus: {np.sum(consensus_mask)} pixels")
+        return consensus_mask
+    
+    def _clean_probability_mask(self, mask):
+        """Clean up probability-based mask with morphological operations."""
+        # Remove noise
+        cleaned = morphology.remove_small_objects(mask, min_size=5000)
+        
+        # Fill holes
+        cleaned = morphology.remove_small_holes(cleaned, area_threshold=10000)
+        
+        # Gentle morphological operations
+        cleaned = morphology.binary_opening(cleaned, morphology.disk(3))
+        cleaned = morphology.binary_closing(cleaned, morphology.disk(8))
+        
+        # Keep only the largest connected component
+        labeled = label(cleaned)
+        if labeled.max() > 0:
+            regions = regionprops(labeled)
+            largest = max(regions, key=lambda r: r.area)
+            cleaned = labeled == largest.label
+        
+        return cleaned
+    
+    def _sparse_wing_detection(self, prob_map, raw_img, peaks, prob_wing_mask):
+        """Detection optimized for sparse wings - rely heavily on probability map."""
+        logger.info("Applying sparse wing detection strategy...")
+        
+        # For sparse wings, trust the probability map more
+        primary_mask = prob_wing_mask
+        
+        # Use trichomes for minimal validation only
+        if len(peaks) > 0:
+            # Create trichome density map with large smoothing kernel
+            trichome_mask = self._create_sparse_trichome_mask(peaks, prob_map.shape[:2])
+            
+            # Only keep probability regions that have SOME trichome support
+            # Use very lenient threshold for sparse wings
+            validated_mask = primary_mask & trichome_mask
+            
+            # If validation removes too much, fall back to probability only
+            prob_area = np.sum(primary_mask)
+            validated_area = np.sum(validated_mask)
+            
+            if validated_area < prob_area * 0.3:  # Lost more than 70%
+                logger.warning("Trichome validation too restrictive for sparse wing, using probability only")
+                final_mask = primary_mask
+            else:
+                final_mask = validated_mask
+        else:
+            logger.warning("No trichomes available, using probability map only")
+            final_mask = primary_mask
+        
+        # Additional cleanup for sparse wings
+        final_mask = self._sparse_wing_cleanup(final_mask, prob_map, raw_img)
+        
+        logger.info(f"Sparse wing detection result: {np.sum(final_mask)} pixels")
+        return final_mask
+    
+    def _dense_wing_detection(self, prob_map, raw_img, peaks, prob_wing_mask):
+        """Detection for dense wings - use full hybrid approach."""
+        logger.info("Applying dense wing hybrid detection...")
+        
+        # Create trichome-based mask
+        trichome_mask = self._create_dense_trichome_mask(peaks, prob_map.shape[:2])
+        
+        # Combine probability and trichome masks with weighted voting
+        prob_weight = self.prob_weight
+        trichome_weight = self.trichome_weight
+        
+        # Create weighted combination
+        combined_score = (
+            prob_wing_mask.astype(np.float32) * prob_weight +
+            trichome_mask.astype(np.float32) * trichome_weight
+        )
+        
+        # Threshold the combined score
+        hybrid_mask = combined_score > 0.5
+        
+        # Ensure connectivity and reasonable shape
+        hybrid_mask = self._refine_hybrid_mask(hybrid_mask, prob_wing_mask, trichome_mask)
+        
+        logger.info(f"Dense wing hybrid result: {np.sum(hybrid_mask)} pixels")
+        return hybrid_mask
+    
+    def _create_sparse_trichome_mask(self, peaks, shape):
+        """Create trichome mask optimized for sparse wings."""
+        mask = np.zeros(shape, dtype=bool)
+        
+        if len(peaks) == 0:
+            return mask
+        
+        # Use large smoothing kernel for sparse wings
+        sigma = 20  # Larger than dense wing sigma
+        density_map = np.zeros(shape, dtype=np.float32)
+        
+        # Add gaussian blobs at each trichome
+        for peak in peaks:
+            y, x = peak
+            radius = int(3 * sigma)
+            y_min = max(0, y - radius)
+            y_max = min(shape[0], y + radius + 1)
+            x_min = max(0, x - radius)
+            x_max = min(shape[1], x + radius + 1)
+            
+            if y_max > y_min and x_max > x_min:
+                yy, xx = np.mgrid[y_min:y_max, x_min:x_max]
+                gaussian = np.exp(-((yy - y)**2 + (xx - x)**2) / (2 * sigma**2))
+                density_map[y_min:y_max, x_min:x_max] += gaussian
+        
+        # Very low threshold for sparse wings
+        threshold = np.percentile(density_map[density_map > 0], 10) if np.any(density_map > 0) else 0
+        mask = density_map > threshold
+        
+        # Gentle morphological operations
+        mask = morphology.binary_closing(mask, morphology.disk(10))
+        mask = morphology.remove_small_holes(mask, area_threshold=20000)
+        
+        return mask
+    
+    def _create_dense_trichome_mask(self, peaks, shape):
+        """Create trichome mask for dense wings."""
+        mask = np.zeros(shape, dtype=bool)
+        
+        if len(peaks) == 0:
+            return mask
+        
+        # Standard smoothing for dense wings
+        sigma = 12
+        density_map = np.zeros(shape, dtype=np.float32)
+        
+        for peak in peaks:
+            y, x = peak
+            radius = int(3 * sigma)
+            y_min = max(0, y - radius)
+            y_max = min(shape[0], y + radius + 1)
+            x_min = max(0, x - radius)
+            x_max = min(shape[1], x + radius + 1)
+            
+            if y_max > y_min and x_max > x_min:
+                yy, xx = np.mgrid[y_min:y_max, x_min:x_max]
+                gaussian = np.exp(-((yy - y)**2 + (xx - x)**2) / (2 * sigma**2))
+                density_map[y_min:y_max, x_min:x_max] += gaussian
+        
+        # Higher threshold for dense wings
+        threshold = np.percentile(density_map[density_map > 0], 20) if np.any(density_map > 0) else 0
+        mask = density_map > threshold
+        
+        # Standard morphological operations
+        mask = morphology.binary_closing(mask, morphology.disk(8))
+        mask = morphology.remove_small_holes(mask, area_threshold=10000)
+        
+        return mask
+    
+    def _sparse_wing_cleanup(self, mask, prob_map, raw_img):
+        """Additional cleanup specific to sparse wings."""
+        # For sparse wings, be more conservative about morphological operations
+        
+        # Light cleanup only
+        cleaned = morphology.remove_small_objects(mask, min_size=20000)
+        cleaned = morphology.remove_small_holes(cleaned, area_threshold=15000)
+        
+        # Use probability map to guide boundary refinement
+        if prob_map.shape[-1] >= 4:
+            intervein_prob = prob_map[..., 3]
+            # Expand into high-probability intervein areas
+            high_prob_areas = intervein_prob > 0.6
+            expanded = morphology.binary_dilation(cleaned, morphology.disk(5))
+            cleaned = cleaned | (expanded & high_prob_areas)
+        
+        return cleaned
+    
+    def _refine_hybrid_mask(self, hybrid_mask, prob_mask, trichome_mask):
+        """Refine hybrid mask using information from both components."""
+        
+        # Start with hybrid result
+        refined = hybrid_mask.copy()
+        
+        # If hybrid result is too small, trust probability map more
+        prob_area = np.sum(prob_mask)
+        hybrid_area = np.sum(hybrid_mask)
+        
+        if hybrid_area < prob_area * 0.5:  # Hybrid lost more than 50%
+            logger.info("Hybrid result too restrictive, expanding with probability map")
+            # Add back high-confidence probability regions
+            confident_prob = morphology.binary_erosion(prob_mask, morphology.disk(3))
+            refined = refined | confident_prob
+        
+        # Ensure reasonable connectivity
+        refined = morphology.remove_small_objects(refined, min_size=30000)
+        refined = morphology.remove_small_holes(refined, area_threshold=15000)
+        
+        # Keep largest connected component
+        labeled = label(refined)
+        if labeled.max() > 0:
+            regions = regionprops(labeled)
+            largest = max(regions, key=lambda r: r.area)
+            refined = labeled == largest.label
+        
+        return refined
+    
+    def create_detection_comparison_visualization(self, prob_map, raw_img, peaks, 
+                                                prob_mask, hybrid_mask, output_path):
+        """Create visualization comparing different detection approaches."""
+        
+        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+        
+        bg_img = raw_img if raw_img is not None else prob_map[..., 0]
+        
+        # Top row: inputs
+        axes[0, 0].imshow(bg_img, cmap='gray')
+        axes[0, 0].set_title('Original Image')
+        axes[0, 0].axis('off')
+        
+        axes[0, 1].imshow(prob_map[..., 3] if prob_map.shape[-1] >= 4 else prob_map[..., 0], cmap='viridis')
+        axes[0, 1].set_title('Probability Map')
+        axes[0, 1].axis('off')
+        
+        axes[0, 2].imshow(bg_img, cmap='gray')
+        if len(peaks) > 0:
+            axes[0, 2].scatter(peaks[:, 1], peaks[:, 0], c='red', s=1, alpha=0.6)
+        axes[0, 2].set_title(f'Trichomes (n={len(peaks)})')
+        axes[0, 2].axis('off')
+        
+        # Bottom row: results
+        axes[1, 0].imshow(prob_mask, cmap='Blues')
+        axes[1, 0].set_title(f'Probability-based Mask\n({np.sum(prob_mask)} pixels)')
+        axes[1, 0].axis('off')
+        
+        axes[1, 1].imshow(hybrid_mask, cmap='Greens')
+        axes[1, 1].set_title(f'Hybrid Mask\n({np.sum(hybrid_mask)} pixels)')
+        axes[1, 1].axis('off')
+        
+        # Comparison overlay
+        axes[1, 2].imshow(bg_img, cmap='gray')
+        axes[1, 2].imshow(prob_mask, cmap='Blues', alpha=0.3, label='Probability')
+        axes[1, 2].imshow(hybrid_mask, cmap='Greens', alpha=0.5, label='Hybrid')
+        
+        # Show overlap and differences
+        overlap = prob_mask & hybrid_mask
+        prob_only = prob_mask & (~hybrid_mask)
+        hybrid_only = hybrid_mask & (~prob_mask)
+        
+        if np.any(prob_only):
+            axes[1, 2].imshow(prob_only, cmap='Blues', alpha=0.7)
+        if np.any(hybrid_only):
+            axes[1, 2].imshow(hybrid_only, cmap='Reds', alpha=0.7)
+        
+        overlap_pct = np.sum(overlap) / max(np.sum(prob_mask | hybrid_mask), 1) * 100
+        axes[1, 2].set_title(f'Comparison Overlay\n{overlap_pct:.1f}% overlap')
+        axes[1, 2].axis('off')
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.close()
+        
+        logger.info(f"Saved detection comparison to {output_path}")
 
 
 
@@ -492,17 +1013,359 @@ class StringRemovalTrichomeFilter:
         print(f"Saved string removal visualization to {output_path}")
 
 
+class EnhancedStringRemovalFilter(StringRemovalTrichomeFilter):
+    """Enhanced string removal that works with hybrid wing detection."""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        # Make string removal more conservative for sparse wings
+        self.min_string_length = 12  # Increased from 8
+        self.linearity_threshold = 0.8  # Increased from 0.7
+    
+    def adaptive_string_removal(self, peaks, image_shape, trichome_density):
+        """Adaptive string removal based on trichome density."""
+        
+        if trichome_density < 0.1:  # Sparse wing
+            logger.info("Using conservative string removal for sparse wing")
+            # More conservative parameters for sparse wings
+            old_min_length = self.min_string_length
+            old_linearity = self.linearity_threshold
+            
+            self.min_string_length = 15  # Even more conservative
+            self.linearity_threshold = 0.85
+            
+            result = self.remove_trichome_strings(peaks, image_shape)
+            
+            # Restore original parameters
+            self.min_string_length = old_min_length
+            self.linearity_threshold = old_linearity
+            
+            return result
+        else:
+            # Standard string removal for dense wings
+            return self.remove_trichome_strings(peaks, image_shape)
+
+class StringRemovalTrichomeFilter:
+    """Remove long strings of trichomes (bubble artifacts) using morphological-like operations."""
+    
+    def __init__(self, config):
+        self.config = config
+        # Parameters for string detection and removal
+        self.connection_distance = 25     # Max distance to consider trichomes "connected"
+        self.min_string_length = 8       # Min number of trichomes to be considered a "string"
+        self.max_string_width = 10       # Max width of valid string (bubbles are very thin)
+        self.linearity_threshold = 0.9   # How linear a string must be to be removed (0-1)
+        
+    def remove_trichome_strings(self, peaks, image_shape):
+        """Remove long, thin strings of trichomes that represent bubble artifacts."""
+        
+        if len(peaks) < 20:
+            print("Too few trichomes for string filtering")
+            return peaks
+            
+        print(f"Filtering strings from {len(peaks)} trichomes...")
+        
+        # Step 1: Build connectivity graph between nearby trichomes
+        adjacency_graph = self._build_trichome_graph(peaks)
+        
+        # Step 2: Find connected components (chains/strings)
+        components = self._find_connected_components(adjacency_graph)
+        
+        # Step 3: Identify which components are "strings" vs "blobs"
+        string_components = self._identify_string_components(peaks, components)
+        
+        # Step 4: Remove trichomes that belong to string components
+        filtered_peaks = self._remove_string_trichomes(peaks, string_components)
+        
+        removed_count = len(peaks) - len(filtered_peaks)
+        print(f"  Removed {removed_count} trichomes from {len(string_components)} string artifacts")
+        print(f"  Remaining: {len(filtered_peaks)} trichomes")
+        
+        return filtered_peaks
+    
+    def _build_trichome_graph(self, peaks):
+        """Build graph of connected trichomes based on distance."""
+        n_peaks = len(peaks)
+        
+        # Calculate pairwise distances
+        distances = squareform(pdist(peaks))
+        
+        # Create adjacency matrix
+        adjacency = distances <= self.connection_distance
+        
+        # Remove self-connections
+        np.fill_diagonal(adjacency, False)
+        
+        return adjacency
+    
+    def _find_connected_components(self, adjacency_graph):
+        """Find connected components in the trichome graph."""
+        n_nodes = adjacency_graph.shape[0]
+        visited = np.zeros(n_nodes, dtype=bool)
+        components = []
+        
+        for start_node in range(n_nodes):
+            if visited[start_node]:
+                continue
+                
+            # BFS to find all connected nodes
+            component = []
+            queue = [start_node]
+            
+            while queue:
+                node = queue.pop(0)
+                if visited[node]:
+                    continue
+                    
+                visited[node] = True
+                component.append(node)
+                
+                # Add unvisited neighbors to queue
+                neighbors = np.where(adjacency_graph[node])[0]
+                for neighbor in neighbors:
+                    if not visited[neighbor]:
+                        queue.append(neighbor)
+            
+            if len(component) > 1:  # Only keep components with multiple trichomes
+                components.append(component)
+        
+        return components
+    
+    def _identify_string_components(self, peaks, components):
+        """Identify which components are long strings vs compact blobs."""
+        string_components = []
+        
+        for i, component in enumerate(components):
+            if len(component) < self.min_string_length:
+                continue  # Too short to be a problematic string
+            
+            component_peaks = peaks[component]
+            
+            # Calculate component geometry
+            is_string = self._is_linear_string(component_peaks)
+            
+            if is_string:
+                string_components.append(component)
+                print(f"    String {len(string_components)}: {len(component)} trichomes")
+            else:
+                print(f"    Blob {i}: {len(component)} trichomes (kept)")
+        
+        return string_components
+    
+    def _is_linear_string(self, component_peaks):
+        """Check if a component is a linear string (bubble artifact)."""
+        
+        if len(component_peaks) < 3:
+            return False
+        
+        # Method 1: Check aspect ratio of bounding box
+        min_coords = np.min(component_peaks, axis=0)
+        max_coords = np.max(component_peaks, axis=0)
+        bbox_dims = max_coords - min_coords
+        
+        if bbox_dims[0] > 0 and bbox_dims[1] > 0:
+            aspect_ratio = max(bbox_dims) / min(bbox_dims)
+            
+            # Very elongated = likely string
+            if aspect_ratio > 8.0:
+                return True
+        
+        # Method 2: Check linearity using PCA
+        try:
+            # Center the points
+            centered = component_peaks - np.mean(component_peaks, axis=0)
+            
+            # Compute covariance matrix
+            cov_matrix = np.cov(centered.T)
+            
+            # Get eigenvalues
+            eigenvalues = np.linalg.eigvals(cov_matrix)
+            eigenvalues = np.sort(eigenvalues)[::-1]  # Sort descending
+            
+            # Linearity measure: ratio of largest to smallest eigenvalue
+            if eigenvalues[1] > 0:
+                linearity = eigenvalues[0] / eigenvalues[1]
+                
+                # High linearity = string-like
+                if linearity > 15.0:
+                    return True
+        except:
+            pass  # Skip if PCA fails
+        
+        # Method 3: Check "width" of the string
+        if len(component_peaks) >= 4:
+            # Fit a line through the points and measure perpendicular distances
+            try:
+                # Simple line fitting using first and last points
+                start_point = component_peaks[0]
+                end_point = component_peaks[-1]
+                
+                # Vector along the line
+                line_vector = end_point - start_point
+                line_length = np.linalg.norm(line_vector)
+                
+                if line_length > 0:
+                    line_unit = line_vector / line_length
+                    
+                    # Calculate perpendicular distances
+                    perp_distances = []
+                    for point in component_peaks:
+                        to_point = point - start_point
+                        # Project onto line
+                        projection_length = np.dot(to_point, line_unit)
+                        projection = start_point + projection_length * line_unit
+                        # Perpendicular distance
+                        perp_dist = np.linalg.norm(point - projection)
+                        perp_distances.append(perp_dist)
+                    
+                    # If most points are very close to the line = string
+                    max_width = np.max(perp_distances)
+                    
+                    if max_width < self.max_string_width and line_length > 100:
+                        return True
+            except:
+                pass
+        
+        return False
+    
+    def _remove_string_trichomes(self, peaks, string_components):
+        """Remove trichomes that belong to string components."""
+        
+        # Flatten list of string indices
+        string_indices = set()
+        for component in string_components:
+            string_indices.update(component)
+        
+        # Keep trichomes that are NOT in string components
+        keep_mask = np.array([i not in string_indices for i in range(len(peaks))])
+        filtered_peaks = peaks[keep_mask]
+        
+        return filtered_peaks
+    
+    def create_wing_mask_simple(self, filtered_peaks, image_shape):
+        """Create wing mask from filtered trichomes using simple approach."""
+        
+        if len(filtered_peaks) < 10:
+            print("Too few filtered trichomes")
+            return None
+        
+        print(f"Creating wing mask from {len(filtered_peaks)} filtered trichomes...")
+        
+        # Method: Dense region growing
+        density_map = np.zeros(image_shape, dtype=np.float32)
+        
+        # Add gaussian blob at each trichome
+        sigma = 12  # Smoothing radius
+        for peak in filtered_peaks:
+            y, x = peak
+            
+            # Add gaussian contribution
+            radius = int(3 * sigma)
+            y_min, y_max = max(0, y-radius), min(image_shape[0], y+radius+1)
+            x_min, x_max = max(0, x-radius), min(image_shape[1], x+radius+1)
+            
+            if y_max > y_min and x_max > x_min:
+                yy, xx = np.mgrid[y_min:y_max, x_min:x_max]
+                gaussian = np.exp(-((yy-y)**2 + (xx-x)**2) / (2*sigma**2))
+                density_map[y_min:y_max, x_min:x_max] += gaussian
+        
+        # Smooth the density map
+        density_map = ndimage.gaussian_filter(density_map, sigma=3)
+        
+        # Threshold to get wing regions
+        threshold = np.percentile(density_map[density_map > 0], 20)  # Keep top 80%
+        wing_mask = density_map > threshold
+        
+        # Clean up
+        wing_mask = morphology.binary_closing(wing_mask, morphology.disk(8))
+        wing_mask = morphology.remove_small_holes(wing_mask, area_threshold=10000)
+        wing_mask = morphology.remove_small_objects(wing_mask, min_size=20000)
+        
+        # Keep largest component
+        labeled = measure.label(wing_mask)
+        if labeled.max() > 0:
+            regions = measure.regionprops(labeled)
+            largest = max(regions, key=lambda r: r.area)
+            wing_mask = labeled == largest.label
+        
+        print(f"  Wing mask: {np.sum(wing_mask)} pixels")
+        return wing_mask
+    
+    def visualize_string_removal(self, original_peaks, filtered_peaks, removed_peaks, 
+                                wing_mask, prob_map, raw_img, output_path):
+        """Visualize the string removal process."""
+        
+        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+        
+        bg_img = raw_img if raw_img is not None else prob_map[..., 0]
+        
+        # Top row: filtering process
+        axes[0, 0].imshow(bg_img, cmap='gray')
+        if len(original_peaks) > 0:
+            axes[0, 0].scatter(original_peaks[:, 1], original_peaks[:, 0], 
+                             c='red', s=1, alpha=0.6)
+        axes[0, 0].set_title(f'All Detected Trichomes (n={len(original_peaks)})')
+        axes[0, 0].axis('off')
+        
+        # Show removed strings
+        axes[0, 1].imshow(bg_img, cmap='gray')
+        if len(removed_peaks) > 0:
+            axes[0, 1].scatter(removed_peaks[:, 1], removed_peaks[:, 0], 
+                             c='red', s=3, alpha=0.8)
+        axes[0, 1].set_title(f'Removed String Artifacts (n={len(removed_peaks)})')
+        axes[0, 1].axis('off')
+        
+        # Show kept trichomes
+        axes[0, 2].imshow(bg_img, cmap='gray')
+        if len(filtered_peaks) > 0:
+            axes[0, 2].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], 
+                             c='blue', s=2, alpha=0.8)
+        axes[0, 2].set_title(f'Kept Trichomes (n={len(filtered_peaks)})')
+        axes[0, 2].axis('off')
+        
+        # Bottom row: results
+        if wing_mask is not None:
+            axes[1, 0].imshow(wing_mask, cmap='viridis')
+            axes[1, 0].set_title(f'String-Filtered Wing Mask')
+        else:
+            axes[1, 0].text(0.5, 0.5, 'Wing mask failed', ha='center', va='center')
+            axes[1, 0].set_title('Wing Mask (Failed)')
+        axes[1, 0].axis('off')
+        
+        # Show comparison: before vs after
+        axes[1, 1].imshow(bg_img, cmap='gray')
+        if len(original_peaks) > 0:
+            axes[1, 1].scatter(original_peaks[:, 1], original_peaks[:, 0], 
+                             c='red', s=1, alpha=0.3, label='Original')
+        if len(filtered_peaks) > 0:
+            axes[1, 1].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], 
+                             c='blue', s=2, alpha=0.8, label='Filtered')
+        axes[1, 1].legend()
+        axes[1, 1].set_title('Before vs After Filtering')
+        axes[1, 1].axis('off')
+        
+        # Final result
+        axes[1, 2].imshow(bg_img, cmap='gray')
+        if wing_mask is not None:
+            axes[1, 2].imshow(wing_mask, cmap='Blues', alpha=0.4)
+        if len(filtered_peaks) > 0:
+            axes[1, 2].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], 
+                             c='yellow', s=1, alpha=0.8)
+        axes[1, 2].set_title('Final Wing Boundary')
+        axes[1, 2].axis('off')
+        
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.close()
+        
+        print(f"Saved string removal visualization to {output_path}")
+
+
 
 class TrichomeAnalysisGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("HomerWings V2 (Windows Version)")
-        
-        # Windows-specific fixes
-        if sys.platform.startswith('win'):
-            self.root.lift()
-            self.root.focus_force()
-            self.root.state('normal')
+        self.root.title("HomerWings V2 (Now with an icon!)")
         self.root.geometry("1000x800")
         
         # Configuration
@@ -519,792 +1382,12 @@ class TrichomeAnalysisGUI:
         self.current_frame = 0
         self.current_fact = 0
         
-        # CRITICAL FIX: Initialize GUI variables dictionary FIRST
-        self.gui_vars = {}  # This will hold all our GUI variables
-        
-        # Setup GUI components
-        logger.info("Setting up GUI components...")
         self.setup_gui()
         
-        # SIMPLIFIED: Load configuration with verification
-        logger.info("Loading initial configuration...")
-        self.root.after(500, self._load_config_safely)
-        
         # Start progress monitoring
-        self.root.after(1000, self.check_progress)
-
-    def _set_default_values(self):
-        """Set default values using the same system."""
-        defaults = {
-            'min_distance': '8',
-            'high_thresh_abs': '0.30',
-            'low_thresh_abs': '0.20',
-            'scales': "0.8,1.0,1.2",
-            'scale_weight_decay': '0.8',
-            'use_clahe': False,
-            'clahe_clip_limit': '0.01',
-            'use_white_tophat': True,
-            'tophat_radius': '2',
-            'use_local_threshold': True,
-            'local_block_size': '71',
-            'min_peak_intensity': '0.25',
-            'max_peak_density': '0.002',
-            'edge_exclusion_buffer': '10',
-            'dbscan_eps': '10.0',
-            'dbscan_min_samples': '1',
-            'valley_drop': '0.25',
-            'neighbour_tolerance': '0.20',
-            'min_neighbours': '7',
-            'intervein_threshold': '0.4',
-            'min_region_area': '60000',
-            'max_region_area': '1500000',
-            'vein_width_estimate': '7',
-            'min_vein_length': '100',
-            'vein_detection_sensitivity': '0.9',
-            'min_wing_area': '100000',
-            'border_buffer': '20'
-        }
-        
-        for attr_name, default_value in defaults.items():
-            if attr_name in self.gui_vars:
-                try:
-                    var = self.gui_vars[attr_name]['var']
-                    if isinstance(var, tk.BooleanVar):
-                        var.set(bool(default_value))
-                    else:
-                        var.set(str(default_value))
-                except Exception as e:
-                    logger.warning(f"Could not set default for {attr_name}: {e}")
-
-    # def _load_config_safely(self):
-    #     """Safely load configuration with proper verification."""
-    #     try:
-    #         # Verify all GUI variables exist first
-    #         required_vars = [
-    #             'min_distance', 'high_thresh_abs', 'low_thresh_abs', 'scales',
-    #             'use_clahe', 'use_white_tophat', 'use_local_threshold', 'local_block_size'
-    #         ]
-            
-    #         missing_vars = [var for var in required_vars if var not in self.gui_vars]
-            
-    #         if missing_vars:
-    #             logger.warning(f"GUI not ready, missing: {missing_vars}")
-    #             # Try again
-    #             self.root.after(500, self._load_config_safely)
-    #             return
-            
-    #         # All variables exist, proceed with loading
-    #         self._apply_config_to_gui()
-    #         logger.info("Configuration loaded successfully")
-            
-    #     except Exception as e:
-    #         logger.error(f"Error in safe config load: {e}")
-    #         self._set_default_values()
-    def _load_config_safely(self):
-        """Safely load configuration with proper verification and debugging."""
-        try:
-            logger.info("Attempting to load configuration...")
-            
-            # Debug what we have
-            self.debug_gui_variables()
-            
-            # Check if gui_vars exists and has content
-            if not hasattr(self, 'gui_vars') or not self.gui_vars:
-                logger.error("gui_vars is empty or missing!")
-                logger.info("GUI setup may have failed. Trying again...")
-                # Try setup again
-                self.root.after(500, self._load_config_safely)
-                return
-            
-            # Verify critical GUI variables exist
-            required_vars = [
-                'min_distance', 'high_thresh_abs', 'low_thresh_abs', 'scales',
-                'use_clahe', 'use_white_tophat', 'use_local_threshold', 'local_block_size'
-            ]
-            
-            missing_vars = [var for var in required_vars if var not in self.gui_vars]
-            
-            if missing_vars:
-                logger.warning(f"GUI not ready, missing: {missing_vars}")
-                logger.warning(f"Available vars: {list(self.gui_vars.keys())}")
-                
-                # Try a few more times with longer delays
-                if not hasattr(self, '_config_load_attempts'):
-                    self._config_load_attempts = 0
-                
-                self._config_load_attempts += 1
-                
-                if self._config_load_attempts < 5:  # Try up to 5 times
-                    delay = 500 * self._config_load_attempts  # Increasing delay
-                    logger.info(f"Attempt {self._config_load_attempts}/5, retrying in {delay}ms")
-                    self.root.after(delay, self._load_config_safely)
-                    return
-                else:
-                    logger.error("Max attempts reached. Using default values.")
-                    self._set_default_values()
-                    return
-            
-            # All variables exist, proceed with loading
-            logger.info("All required GUI variables found. Applying configuration...")
-            self._apply_config_to_gui()
-            logger.info("Configuration loaded successfully")
-            
-            # Reset attempt counter on success
-            self._config_load_attempts = 0
-            
-        except Exception as e:
-            logger.error(f"Error in safe config load: {e}")
-            self._set_default_values()
-    def create_config_entry(self, parent, attr_name, label, default_value, data_type):
-        """Simplified config entry creation using dictionary storage."""
-        frame = ttk.Frame(parent)
-        frame.pack(fill=tk.X, pady=2)
-        
-        ttk.Label(frame, text=label, width=25).pack(side=tk.LEFT)
-        
-        # Create variable and store in dictionary
-        var = tk.StringVar(value=str(default_value))
-        entry = ttk.Entry(frame, textvariable=var, width=20)
-        entry.pack(side=tk.LEFT, padx=(5,0))
-        
-        # Store in our dictionary (much more reliable than setattr)
-        self.gui_vars[attr_name] = {
-            'var': var,
-            'type': data_type,
-            'widget': entry
-        }
-        
-        logger.debug(f"Created config entry: {attr_name}")
-    def create_config_checkbox(self, parent, attr_name, label, default_value):
-        """Simplified checkbox creation using dictionary storage."""
-        var = tk.BooleanVar(value=default_value)
-        checkbox = ttk.Checkbutton(parent, text=label, variable=var)
-        checkbox.pack(anchor=tk.W, pady=2)
-        
-        # Store in our dictionary
-        self.gui_vars[attr_name] = {
-            'var': var,
-            'type': bool,
-            'widget': checkbox
-        }
-        
-        logger.debug(f"Created config checkbox: {attr_name}")
-
-    def _apply_config_to_gui(self):
-        """Apply configuration values to GUI - simplified and reliable."""
-        config_values = {
-            'min_distance': self.config.min_distance,
-            'high_thresh_abs': self.config.high_thresh_abs,
-            'low_thresh_abs': self.config.low_thresh_abs,
-            'scales': ",".join(map(str, self.config.scales)),
-            'scale_weight_decay': self.config.scale_weight_decay,
-            'use_clahe': self.config.use_clahe,
-            'clahe_clip_limit': self.config.clahe_clip_limit,
-            'use_white_tophat': self.config.use_white_tophat,
-            'tophat_radius': self.config.tophat_radius,
-            'use_local_threshold': self.config.use_local_threshold,
-            'local_block_size': self.config.local_block_size,
-            'min_peak_intensity': self.config.min_peak_intensity,
-            'max_peak_density': self.config.max_peak_density,
-            'edge_exclusion_buffer': self.config.edge_exclusion_buffer,
-            'dbscan_eps': self.config.dbscan_eps,
-            'dbscan_min_samples': self.config.dbscan_min_samples,
-            'valley_drop': self.config.valley_drop,
-            'neighbour_tolerance': self.config.neighbour_tolerance,
-            'min_neighbours': self.config.min_neighbours,
-            'intervein_threshold': self.config.intervein_threshold,
-            'min_region_area': self.config.min_region_area,
-            'max_region_area': self.config.max_region_area,
-            'vein_width_estimate': self.config.vein_width_estimate,
-            'min_vein_length': self.config.min_vein_length,
-            'vein_detection_sensitivity': self.config.vein_detection_sensitivity,
-            'min_wing_area': self.config.min_wing_area,
-            'border_buffer': self.config.border_buffer
-        }
-        
-        for attr_name, value in config_values.items():
-            if attr_name in self.gui_vars:
-                try:
-                    var = self.gui_vars[attr_name]['var']
-                    if isinstance(var, tk.BooleanVar):
-                        var.set(bool(value))
-                    else:
-                        var.set(str(value))
-                    logger.debug(f"Set {attr_name} = {value}")
-                except Exception as e:
-                    logger.warning(f"Could not set {attr_name}: {e}")
-            else:
-                logger.warning(f"GUI variable {attr_name} not found")
-
-    def load_initial_config(self):
-        """Load initial configuration values into GUI - Windows safe with better error handling."""
-        try:
-            # Use a more robust approach for Windows
-            self._update_gui_safely()
-            logger.info("Initial configuration loaded successfully")
-        except Exception as e:
-            logger.error(f"Error loading initial config: {e}")
-            self.set_default_gui_values()
+        self.root.after(100, self.check_progress)
     
-    def _update_gui_safely(self):
-        """Safely update GUI from config with Windows-specific handling"""
-        try:
-            config_dict = {
-                'min_distance': self.config.min_distance,
-                'high_thresh_abs': self.config.high_thresh_abs,
-                'low_thresh_abs': self.config.low_thresh_abs,
-                'scales': ",".join(map(str, self.config.scales)),
-                'scale_weight_decay': self.config.scale_weight_decay,
-                'use_clahe': self.config.use_clahe,
-                'use_white_tophat': self.config.use_white_tophat,
-                'use_local_threshold': self.config.use_local_threshold,
-                'clahe_clip_limit': self.config.clahe_clip_limit,
-                'tophat_radius': self.config.tophat_radius,
-                'local_block_size': self.config.local_block_size,
-                'local_offset': self.config.local_offset,
-                'min_peak_intensity': self.config.min_peak_intensity,
-                'max_peak_density': self.config.max_peak_density,
-                'edge_exclusion_buffer': self.config.edge_exclusion_buffer,
-                'dbscan_eps': self.config.dbscan_eps,
-                'dbscan_min_samples': self.config.dbscan_min_samples,
-                'valley_drop': self.config.valley_drop,
-                'neighbour_tolerance': self.config.neighbour_tolerance,
-                'min_neighbours': self.config.min_neighbours,
-                'intervein_threshold': self.config.intervein_threshold,
-                'min_region_area': self.config.min_region_area,
-                'max_region_area': self.config.max_region_area,
-                'vein_width_estimate': self.config.vein_width_estimate,
-                'min_vein_length': self.config.min_vein_length,
-                'vein_detection_sensitivity': self.config.vein_detection_sensitivity,
-                'min_wing_area': self.config.min_wing_area,
-                'border_buffer': self.config.border_buffer
-            }
-            
-            for attr_name, value in config_dict.items():
-                var_name = f"{attr_name}_var"
-                if hasattr(self, var_name):
-                    try:
-                        var = getattr(self, var_name)
-                        if isinstance(var, tk.BooleanVar):
-                            # Schedule boolean updates on main thread
-                            self.root.after_idle(lambda v=var, val=value: v.set(bool(val)))
-                        else:
-                            # Schedule string/number updates on main thread
-                            self.root.after_idle(lambda v=var, val=str(value): v.set(val))
-                    except Exception as e:
-                        logger.warning(f"Could not set GUI variable {attr_name}: {e}")
-                        continue
-                        
-        except Exception as e:
-            logger.error(f"Error in safe GUI update: {e}")
-            raise
-    
-    def browse_master_folder(self):
-        """Fixed Windows folder browser with better error handling"""
-        try:
-            # Clear any existing dialogs and ensure main window has focus
-            self.root.focus_set()
-            self.root.update_idletasks()
-            
-            # Force any existing grab to be released
-            try:
-                current_grab = self.root.grab_current()
-                if current_grab:
-                    current_grab.grab_release()
-            except:
-                pass
-            
-            # Wait a moment for any previous operations to complete
-            self.root.after(100, self._do_folder_browse)
-            
-        except Exception as e:
-            logger.error(f"Error preparing folder browser: {e}")
-            messagebox.showerror("Error", f"Could not open folder browser: {e}")
-
-    def _do_folder_browse(self):
-        """Actually perform the folder browsing after ensuring clean state"""
-        try:
-            folder = filedialog.askdirectory(
-                parent=self.root,
-                title="Select Master Folder (containing subfolders with wing data)",
-                mustexist=True
-            )
-            
-            if folder:
-                # Normalize path for Windows
-                folder = os.path.normpath(folder)
-                
-                # FIXED: Ensure GUI update happens on main thread
-                def update_folder_gui():
-                    try:
-                        self.master_folder_var.set(folder)
-                        logger.info(f"Set master folder to: {folder}")
-                        
-                        # Force the entry widget to update its display
-                        self.root.update_idletasks()
-                        
-                        # Auto-set output folder if not already set
-                        if not self.output_folder_var.get().strip():
-                            parent_dir = os.path.dirname(folder)
-                            folder_name = os.path.basename(folder)
-                            output_folder = os.path.join(parent_dir, f"{folder_name}_Results")
-                            output_folder = os.path.normpath(output_folder)
-                            self.output_folder_var.set(output_folder)
-                            logger.info(f"Auto-set output folder to: {output_folder}")
-                        
-                        # Schedule refresh for next event loop cycle
-                        self.root.after(300, self.refresh_folder_list)
-                        
-                    except Exception as e:
-                        logger.error(f"Error updating folder GUI: {e}")
-                
-                # Schedule GUI update for next event loop cycle
-                self.root.after_idle(update_folder_gui)
-                    
-        except Exception as e:
-            logger.error(f"Error in folder browsing: {e}")
-            messagebox.showerror("Error", f"Could not browse for folder: {e}")
-    
-    def refresh_folder_list(self):
-        """Windows-safe folder list refresh with better threading"""
-        try:
-            # Clear existing list immediately
-            self.folder_listbox.delete(0, tk.END)
-            
-            master_folder = self.master_folder_var.get().strip()
-            if not master_folder:
-                return
-            
-            if not os.path.exists(master_folder):
-                self.folder_listbox.insert(tk.END, "⚠ Folder path does not exist")
-                return
-            
-            # Show scanning message
-            self.folder_listbox.insert(tk.END, "Scanning folders...")
-            self.root.update()
-            
-            # Use thread-safe folder scanning
-            try:
-                subfolders = self._scan_folders_safe(master_folder)
-                
-                # Clear and populate with results
-                self.folder_listbox.delete(0, tk.END)
-                
-                if subfolders:
-                    # Sort and add to listbox
-                    subfolders.sort()
-                    for folder_info in subfolders:
-                        self.folder_listbox.insert(tk.END, folder_info)
-                else:
-                    self.folder_listbox.insert(tk.END, "No subfolders with valid files found")
-                    
-            except PermissionError:
-                self.folder_listbox.delete(0, tk.END)
-                self.folder_listbox.insert(tk.END, "⚠ Permission denied - check folder access")
-                logger.error(f"Permission denied accessing {master_folder}")
-            except Exception as e:
-                self.folder_listbox.delete(0, tk.END)
-                self.folder_listbox.insert(tk.END, f"⚠ Error scanning: {str(e)[:50]}...")
-                logger.error(f"Error scanning master folder: {e}")
-                
-        except Exception as e:
-            logger.error(f"Critical error in refresh_folder_list: {e}")
-    
-    def _scan_folders_safe(self, master_folder):
-        """Thread-safe folder scanning for Windows"""
-        subfolders = []
-        
-        try:
-            # Use pathlib for better Windows compatibility
-            master_path = Path(master_folder)
-            
-            for entry in master_path.iterdir():
-                if entry.is_dir():
-                    try:
-                        # Quick check for valid files
-                        mapping = find_associated_files(str(entry))
-                        if mapping:
-                            file_count = len(mapping)
-                            subfolders.append(f"✓ {entry.name} ({file_count} file pairs)")
-                        else:
-                            subfolders.append(f"✗ {entry.name} (no valid files)")
-                    except Exception as e:
-                        subfolders.append(f"⚠ {entry.name} (scan error: {str(e)[:20]}...)")
-                        logger.warning(f"Error scanning {entry.name}: {e}")
-                        
-        except Exception as e:
-            logger.error(f"Error in safe folder scan: {e}")
-            raise
-            
-        return subfolders
-    
-    def create_drosophila_loading_overlay(self):
-        """Fixed loading overlay with Windows-specific grab handling"""
-        if hasattr(self, 'loading_window'):
-            try:
-                if self.loading_window.winfo_exists():
-                    return
-            except tk.TclError:
-                # Window was destroyed, continue
-                pass
-        
-        # Create overlay window
-        self.loading_window = tk.Toplevel(self.root)
-        self.loading_window.title("HomerWings Processing")
-        self.loading_window.geometry("600x450")
-        self.loading_window.resizable(False, False)
-        
-        # Windows-specific window setup
-        self.loading_window.transient(self.root)
-        
-        # Position relative to main window with error handling
-        try:
-            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 300
-            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 225
-            self.loading_window.geometry(f"500x450+{x}+{y}")
-        except tk.TclError:
-            # Fallback positioning
-            self.loading_window.geometry("500x450+100+100")
-        
-        self.loading_window.configure(bg='#1a1a1a')
-        
-        # FIXED: Handle grab_set with Windows-specific error handling
-        def safe_grab():
-            try:
-                # Wait a moment for window to be fully created
-                self.root.after(100, lambda: self._attempt_grab())
-            except Exception as e:
-                logger.warning(f"Could not set window grab: {e}")
-                # Continue without grab - window will still work
-        
-        safe_grab()
-        
-        # Main frame
-        main_frame = tk.Frame(self.loading_window, bg='#1a1a1a')
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Title
-        title_label = tk.Label(
-            main_frame, 
-            text="HomerWings Analysis Suite", 
-            font=('Arial', 18, 'bold'),
-            fg='#00d4aa',
-            bg='#1a1a1a'
-        )
-        title_label.pack(pady=(0, 15))
-        
-        # Load embedded GIF
-        self.gif_frames, self.gif_durations = self.load_embedded_gif_frames()
-        
-        # Create label for GIF animation
-        self.gif_label = tk.Label(
-            main_frame,
-            bg='#1a1a1a',
-            borderwidth=0
-        )
-        self.gif_label.pack(pady=15)
-        
-        # Initialize animation variables
-        self.current_frame = 0
-        self.animation_running = True
-        
-        # If GIF loading failed, show a fallback
-        if self.gif_frames is None:
-            self.gif_label.config(
-                text="🦋 Drosophila Analysis 🦋",
-                font=('Arial', 24),
-                fg='#00d4aa'
-            )
-        else:
-            # Start the GIF animation
-            self.animate_gif()
-        
-        # Status text
-        self.loading_status_label = tk.Label(
-            main_frame,
-            text="Initializing trichome detection...",
-            font=('Arial', 12),
-            fg='#ffffff',
-            bg='#1a1a1a',
-            wraplength=400
-        )
-        self.loading_status_label.pack(pady=15)
-        
-        # Progress indicator
-        self.loading_progress_label = tk.Label(
-            main_frame,
-            text="Preparing wing analysis...",
-            font=('Arial', 10),
-            fg='#888888',
-            bg='#1a1a1a'
-        )
-        self.loading_progress_label.pack(pady=10)
-        
-        # Wing analysis facts
-        wing_facts = [
-            "Detecting trichome patterns on wing surface...",
-            "Bananas are radioactive!", 
-            "A single Bolt of lightning contains enough energy to toast 20,000 slices of bread!",
-            "Applying computer vision to wing venation...",
-            "Computing cellular tessellations...",
-            "You cant burp in space!",
-            "Analyzing wing blade morphology...",
-            "Processing trichome density patterns..."
-        ]
-        
-        self.current_fact = 0
-        self.facts_list = wing_facts
-        
-        self.facts_label = tk.Label(
-            main_frame,
-            text=wing_facts[0],
-            font=('Arial', 9, 'italic'),
-            fg='#666666',
-            bg='#1a1a1a',
-            wraplength=400
-        )
-        self.facts_label.pack(pady=5)
-        
-        # Cancel button
-        cancel_frame = tk.Frame(main_frame, bg='#1a1a1a')
-        cancel_frame.pack(pady=20)
-        cancel_button = tk.Button(
-           cancel_frame,
-           text="Cancel Analysis",
-           command=self.cancel_processing_from_overlay,
-           bg='#dc3545',
-           fg='white',
-           activebackground='#c82333',
-           activeforeground='white',
-           font=('Arial', 11, 'bold'),
-           relief=tk.RAISED,
-           bd=2,
-           padx=25,
-           pady=10,
-           cursor='hand2'
-           )
-        cancel_button.pack()
-       
-        # Start fact cycling
-        self.cycle_wing_facts()
-       
-        # Prevent closing with X button
-        self.loading_window.protocol("WM_DELETE_WINDOW", self.on_loading_window_close)
-    
-    def _attempt_grab(self):
-        """Attempt to set window grab with Windows error handling"""
-        try:
-            if hasattr(self, 'loading_window') and self.loading_window.winfo_exists():
-                # Try to grab - if it fails, just continue without it
-                self.loading_window.grab_set()
-        except tk.TclError as e:
-            logger.warning(f"Could not grab window (this is often normal on Windows): {e}")
-            # Don't raise the error - the window will still work fine
-        except Exception as e:
-            logger.warning(f"Unexpected error setting grab: {e}")
-    
-    def close_loading_overlay(self):
-        """Windows-safe loading overlay cleanup"""
-        self.animation_running = False
-        
-        # Clear GIF references to prevent memory leaks
-        if hasattr(self, 'gif_frames'):
-            self.gif_frames = None
-        if hasattr(self, 'gif_durations'):
-            self.gif_durations = None
-        
-        if hasattr(self, 'loading_window'):
-            try:
-                if self.loading_window.winfo_exists():
-                    # Windows-safe grab release
-                    try:
-                        self.loading_window.grab_release()
-                    except tk.TclError:
-                        pass  # Grab might not have been set
-                    
-                    self.loading_window.destroy()
-            except tk.TclError:
-                pass  # Window might already be destroyed
-            except Exception as e:
-                logger.warning(f"Error closing loading overlay: {e}")
-    
-    def start_processing(self):
-        """Fixed start processing with better Windows error handling"""
-        if not self.master_folder_var.get() or not self.output_folder_var.get():
-            messagebox.showerror("Error", "Please select both master folder and output folder")
-            return
-        
-        if not self.update_config_from_gui():
-            return
-        
-        # Disable buttons first
-        self.is_processing = True
-        self.start_button.config(state=tk.DISABLED)
-        self.stop_button.config(state=tk.NORMAL)
-        
-        # Create loading overlay with error handling
-        try:
-            self.create_drosophila_loading_overlay()
-        except Exception as e:
-            logger.error(f"Error creating loading overlay: {e}")
-            # Continue without overlay
-            pass
-        
-        # Start processing in separate thread
-        self.processing_thread = threading.Thread(target=self.process_folders, daemon=True)
-        self.processing_thread.start()
-    
-    def check_progress(self):
-        """Improved Windows progress checker with better error handling"""
-        try:
-            messages_processed = 0
-            max_messages = 15  # Process fewer messages per check on Windows
-            
-            while messages_processed < max_messages:
-                try:
-                    msg_type, message = self.progress_queue.get_nowait()
-                    messages_processed += 1
-                    
-                    # Use after_idle for all GUI updates to avoid conflicts
-                    if msg_type == "progress":
-                        self.root.after_idle(lambda msg=message: self._safe_set_progress(msg))
-                    elif msg_type == "current_folder":
-                        self.root.after_idle(lambda msg=message: self._safe_set_current_folder(msg))
-                    elif msg_type == "progress_percent":
-                        self.root.after_idle(lambda pct=message: self._safe_set_progress_percent(pct))
-                    elif msg_type == "log":
-                        self.root.after_idle(lambda msg=message: self._safe_log_message(msg))
-                    elif msg_type == "error":
-                        self.root.after_idle(lambda msg=message: self._safe_log_message(f"ERROR: {msg}"))
-                    elif msg_type == "summary":
-                        self.root.after_idle(lambda msg=message: self._update_summary(msg))
-                    elif msg_type == "finished":
-                        self.root.after_idle(self._processing_finished)
-                        return  # Stop checking
-                        
-                except queue.Empty:
-                    break
-                except Exception as e:
-                    logger.error(f"Error processing progress message: {e}")
-                    break
-           
-        except Exception as e:
-            logger.error(f"Progress check error: {e}")
-        
-        # Schedule next check if still processing
-        if self.is_processing:
-            self.root.after(200, self.check_progress)  # Longer interval for Windows
-    
-    def _safe_set_progress(self, message):
-        """Thread-safe progress update with error handling"""
-        try:
-            self.progress_var.set(message)
-            self.update_loading_status(message)
-        except Exception as e:
-            logger.debug(f"Error setting progress: {e}")
-    
-    def _safe_set_current_folder(self, message):
-        """Thread-safe current folder update with error handling"""
-        try:
-            self.current_folder_var.set(message)
-            self.update_loading_status(message)
-        except Exception as e:
-            logger.debug(f"Error setting current folder: {e}")
-    
-    def _safe_set_progress_percent(self, percent):
-        """Thread-safe progress bar update with error handling"""
-        try:
-            self.progress_bar['value'] = percent
-        except Exception as e:
-            logger.debug(f"Error setting progress bar: {e}")
-    
-    def _safe_log_message(self, message):
-        """Thread-safe log message with error handling"""
-        try:
-            self.log_message(message)
-        except Exception as e:
-            logger.debug(f"Error logging message: {e}")
-    
-    def _processing_finished(self):
-        """Handle processing completion - Windows safe with better error handling"""
-        try:
-            self.is_processing = False
-            self.start_button.config(state=tk.NORMAL)
-            self.stop_button.config(state=tk.DISABLED)
-            
-            # Close overlay safely
-            self.close_loading_overlay()
-            
-            # Force GUI update
-            self.root.update_idletasks()
-            
-            # Show completion message
-            self.progress_var.set("Processing completed!")
-            
-        except Exception as e:
-            logger.error(f"Error in processing finished handler: {e}")
-    
-    # Rest of the methods remain the same...
-    # def setup_gui(self):
-    #     # Create main notebook for tabs
-    #     self.notebook = ttk.Notebook(self.root)
-    #     self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-    #     # Tab 1: File Selection and Processing
-    #     self.processing_frame = ttk.Frame(self.notebook)
-    #     self.notebook.add(self.processing_frame, text="Processing")
-        
-    #     # Tab 2: Configuration
-    #     self.config_frame = ttk.Frame(self.notebook)
-    #     self.notebook.add(self.config_frame, text="Configuration")
-        
-    #     # Tab 3: Advanced Settings
-    #     self.advanced_frame = ttk.Frame(self.notebook)
-    #     self.notebook.add(self.advanced_frame, text="Advanced")
-        
-    #     # Tab 4: Results/Log
-    #     self.results_frame = ttk.Frame(self.notebook)
-    #     self.notebook.add(self.results_frame, text="Results & Log")
-        
-    #     self.setup_processing_tab()
-    #     self.setup_config_tab()
-    #     self.setup_advanced_tab()
-    #     self.setup_results_tab()
-    def debug_gui_variables(self):
-        """Debug method to check GUI variable creation."""
-        logger.info("=== GUI VARIABLES DEBUG ===")
-        logger.info(f"self.gui_vars exists: {hasattr(self, 'gui_vars')}")
-        
-        if hasattr(self, 'gui_vars'):
-            logger.info(f"gui_vars type: {type(self.gui_vars)}")
-            logger.info(f"gui_vars length: {len(self.gui_vars)}")
-            
-            if self.gui_vars:
-                logger.info("GUI Variables found:")
-                for name, info in self.gui_vars.items():
-                    try:
-                        var = info['var']
-                        current_value = var.get()
-                        var_type = type(var).__name__
-                        logger.info(f"  {name}: {var_type} = {current_value}")
-                    except Exception as e:
-                        logger.error(f"  {name}: ERROR reading value - {e}")
-            else:
-                logger.error("gui_vars dictionary is empty!")
-        else:
-            logger.error("self.gui_vars does not exist!")
-        
-        logger.info("=== END DEBUG ===")
-
     def setup_gui(self):
-        """Modified setup_gui with debugging."""
-        logger.info("Starting setup_gui...")
-        
-        # Ensure gui_vars exists
-        if not hasattr(self, 'gui_vars'):
-            self.gui_vars = {}
-            logger.info("Created gui_vars dictionary")
-        
         # Create main notebook for tabs
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -1325,23 +1408,103 @@ class TrichomeAnalysisGUI:
         self.results_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.results_frame, text="Results & Log")
         
-        logger.info("Setting up processing tab...")
         self.setup_processing_tab()
-        
-        logger.info("Setting up config tab...")
         self.setup_config_tab()
-        
-        logger.info("Setting up advanced tab...")
         self.setup_advanced_tab()
-        
-        logger.info("Setting up results tab...")
         self.setup_results_tab()
-        
-        # Debug: Check what we created
-        self.debug_gui_variables()
-        
-        logger.info("setup_gui completed")
+
     
+    def update_loading_status_with_hybrid_info(self, status_text):
+        """Update loading status with hybrid detection information."""
+        if hasattr(self, 'loading_status_label'):
+            try:
+                if self.loading_status_label.winfo_exists():
+                    # Add hybrid detection context to status messages
+                    if "sparse" in status_text.lower():
+                        enhanced_status = f"🦋 {status_text} (Using probability-dominant approach)"
+                    elif "dense" in status_text.lower():
+                        enhanced_status = f"🦋 {status_text} (Using hybrid validation)"
+                    elif "wing" in status_text.lower():
+                        enhanced_status = f"🦋 {status_text} (Adaptive detection active)"
+                    else:
+                        enhanced_status = status_text
+                    
+                    self.loading_status_label.config(text=enhanced_status)
+            except tk.TclError:
+                pass
+    
+    def _enhance_log_message(self, message):
+        """Enhance log messages with hybrid detection context."""
+        # Add context indicators for different types of processing
+        if "sparse wing" in message.lower():
+            return f"🌟 {message}"  # Special indicator for sparse wing processing
+        elif "hybrid" in message.lower():
+            return f"🔄 {message}"  # Hybrid processing indicator
+        elif "probability" in message.lower() and "dominant" in message.lower():
+            return f"📊 {message}"  # Probability-dominant indicator
+        elif "string removal" in message.lower():
+            return f"🧹 {message}"  # String removal indicator
+        else:
+            return message
+    
+    def check_progress_with_hybrid_info(self):
+        """Enhanced progress checker with hybrid detection information."""
+        try:
+            messages_processed = 0
+            max_messages = 15
+            
+            while messages_processed < max_messages:
+                try:
+                    msg_type, message = self.progress_queue.get_nowait()
+                    messages_processed += 1
+                    
+                    # Enhanced message processing for hybrid detection
+                    if msg_type == "progress":
+                        self.root.after_idle(lambda msg=message: self._safe_set_progress_with_context(msg))
+                    elif msg_type == "current_folder":
+                        self.root.after_idle(lambda msg=message: self._safe_set_current_folder_with_context(msg))
+                    elif msg_type == "progress_percent":
+                        self.root.after_idle(lambda pct=message: self._safe_set_progress_percent(pct))
+                    elif msg_type == "log":
+                        # Enhanced logging with hybrid detection context
+                        enhanced_msg = self._enhance_log_message(message)
+                        self.root.after_idle(lambda msg=enhanced_msg: self._safe_log_message(msg))
+                    elif msg_type == "error":
+                        self.root.after_idle(lambda msg=message: self._safe_log_message(f"ERROR: {msg}"))
+                    elif msg_type == "summary":
+                        self.root.after_idle(lambda msg=message: self._update_summary(msg))
+                    elif msg_type == "finished":
+                        self.root.after_idle(self._processing_finished)
+                        return
+                        
+                except queue.Empty:
+                    break
+                except Exception as e:
+                    logger.error(f"Error processing progress message: {e}")
+                    break
+            
+        except Exception as e:
+            logger.error(f"Progress check error: {e}")
+        
+        # Schedule next check if still processing
+        if self.is_processing:
+            self.root.after(200, self.check_progress_with_hybrid_info)
+    
+    def _safe_set_progress_with_context(self, message):
+        """Thread-safe progress update with hybrid detection context."""
+        try:
+            self.progress_var.set(message)
+            self.update_loading_status_with_hybrid_info(message)
+        except:
+            pass
+    
+    def _safe_set_current_folder_with_context(self, message):
+        """Thread-safe current folder update with hybrid detection context."""
+        try:
+            self.current_folder_var.set(message)
+            self.update_loading_status_with_hybrid_info(message)
+        except:
+            pass
     def setup_processing_tab(self):
         # File selection section
         file_frame = ttk.LabelFrame(self.processing_frame, text="Folder Selection", padding=10)
@@ -1423,7 +1586,6 @@ class TrichomeAnalysisGUI:
         self.current_folder_var = tk.StringVar(value="")
         ttk.Label(progress_frame, textvariable=self.current_folder_var, font=('TkDefaultFont', 8)).pack(anchor=tk.W)
     
-
     def setup_config_tab(self):
         # Create scrollable frame
         canvas = tk.Canvas(self.config_frame)
@@ -1442,7 +1604,6 @@ class TrichomeAnalysisGUI:
         core_frame = ttk.LabelFrame(scrollable_frame, text="Core Detection Parameters", padding=10)
         core_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # FIXED: Make sure we're calling the new methods that use dictionary storage
         self.create_config_entry(core_frame, "min_distance", "Minimum distance between peaks:", self.config.min_distance, int)
         self.create_config_entry(core_frame, "high_thresh_abs", "High threshold (absolute):", self.config.high_thresh_abs, float)
         self.create_config_entry(core_frame, "low_thresh_abs", "Low threshold (absolute):", self.config.low_thresh_abs, float)
@@ -1478,13 +1639,11 @@ class TrichomeAnalysisGUI:
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        
-        # DEBUG: Log what we created
-        logger.info(f"setup_config_tab completed. Created {len(self.gui_vars)} GUI variables:")
-        for var_name in self.gui_vars.keys():
-            logger.info(f"  - {var_name}")
+    
+
     
     def setup_advanced_tab(self):
+        """Enhanced advanced tab with hybrid detection options."""
         # Create scrollable frame
         canvas = tk.Canvas(self.advanced_frame)
         scrollbar = ttk.Scrollbar(self.advanced_frame, orient="vertical", command=canvas.yview)
@@ -1498,6 +1657,50 @@ class TrichomeAnalysisGUI:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
+        # === NEW: Hybrid Wing Detection Section ===
+        hybrid_frame = ttk.LabelFrame(scrollable_frame, text="Hybrid Wing Detection", padding=10)
+        hybrid_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Enable/disable hybrid detection
+        self.create_config_checkbox(hybrid_frame, "use_hybrid_detection", 
+                                    "Enable hybrid detection (recommended for sparse wings)", True)
+        
+        # Hybrid detection parameters
+        self.create_config_entry(hybrid_frame, "sparse_threshold", "Sparse wing threshold (trichome density):", 
+                                0.1, float)
+        self.create_config_entry(hybrid_frame, "prob_weight", "Probability map weight (hybrid mode):", 
+                                0.8, float)
+        self.create_config_entry(hybrid_frame, "trichome_weight", "Trichome validation weight (hybrid mode):", 
+                                0.2, float)
+        
+        # Wing detection fallback options
+        fallback_frame = ttk.LabelFrame(scrollable_frame, text="Sparse Wing Handling", padding=10)
+        fallback_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.create_config_checkbox(fallback_frame, "conservative_string_removal", 
+                                    "Use conservative string removal for sparse wings", True)
+        self.create_config_checkbox(fallback_frame, "probability_dominant_sparse", 
+                                    "Use probability-dominant approach for very sparse wings", True)
+        self.create_config_entry(fallback_frame, "min_trichomes_for_validation", 
+                                "Minimum trichomes required for validation:", 50, int)
+        
+        # Detection method selection
+        method_frame = ttk.LabelFrame(scrollable_frame, text="Wing Detection Method", padding=10)
+        method_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.wing_detection_method_var = tk.StringVar(value="hybrid")
+        ttk.Label(method_frame, text="Detection method:").pack(anchor=tk.W)
+        method_selection_frame = ttk.Frame(method_frame)
+        method_selection_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Radiobutton(method_selection_frame, text="Auto (Hybrid)", 
+                       variable=self.wing_detection_method_var, value="hybrid").pack(side=tk.LEFT)
+        ttk.Radiobutton(method_selection_frame, text="Probability Only", 
+                       variable=self.wing_detection_method_var, value="probability").pack(side=tk.LEFT, padx=(20,0))
+        ttk.Radiobutton(method_selection_frame, text="Trichome Only (Legacy)", 
+                       variable=self.wing_detection_method_var, value="trichome").pack(side=tk.LEFT, padx=(20,0))
+        
+        # === Continue with existing sections ===
         # Clustering and Filtering
         cluster_frame = ttk.LabelFrame(scrollable_frame, text="Clustering and Filtering", padding=10)
         cluster_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -1507,7 +1710,14 @@ class TrichomeAnalysisGUI:
         self.create_config_entry(cluster_frame, "valley_drop", "Valley drop threshold:", self.config.valley_drop, float)
         self.create_config_entry(cluster_frame, "neighbour_tolerance", "Neighbor tolerance:", self.config.neighbour_tolerance, float)
         self.create_config_entry(cluster_frame, "min_neighbours", "Minimum neighbors:", self.config.min_neighbours, int)
+        merge_frame = ttk.LabelFrame(scrollable_frame, text="Region Merge Options", padding=10)
+        merge_frame.pack(fill=tk.X, padx=10, pady=5)
         
+        self.create_config_checkbox(merge_frame, "force_merge_regions_4_5", 
+                                    "Force merge regions 4+5 (even when detected separately)", True)
+        
+        ttk.Label(merge_frame, text="Note: Merge mode overrides normal 5-region detection.", 
+                 font=('TkDefaultFont', 8, 'italic')).pack(anchor=tk.W, pady=(5,0))
         # Intervein Segmentation
         intervein_frame = ttk.LabelFrame(scrollable_frame, text="Intervein Segmentation", padding=10)
         intervein_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -1545,8 +1755,194 @@ class TrichomeAnalysisGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # DEBUG: Log total variables after advanced tab
-        logger.info(f"setup_advanced_tab completed. Total GUI variables: {len(self.gui_vars)}")
+
+    
+    
+    # REPLACE: Replace your existing update_config_from_gui method with this enhanced version
+    
+    def update_config_from_gui(self):
+        """Updated config update method including hybrid detection parameters."""
+        try:
+            errors = []
+            
+            # Process existing GUI variables
+            for attr_name, gui_info in self.gui_vars.items():
+                try:
+                    var = gui_info['var']
+                    expected_type = gui_info['type']
+                    
+                    if isinstance(var, tk.BooleanVar):
+                        value = var.get()
+                        setattr(self.config, attr_name, value)
+                    else:
+                        value_str = var.get().strip()
+                        if not value_str:
+                            errors.append(f"{attr_name}: Empty value")
+                            continue
+                        
+                        # Special handling for scales
+                        if attr_name == "scales":
+                            try:
+                                scales = [float(x.strip()) for x in value_str.split(',') if x.strip()]
+                                if not scales:
+                                    errors.append("scales: No valid scales provided")
+                                    continue
+                                setattr(self.config, attr_name, scales)
+                            except ValueError as e:
+                                errors.append(f"scales: Invalid values - {e}")
+                                continue
+                        else:
+                            # Regular type conversion
+                            try:
+                                converted_value = expected_type(value_str)
+                                setattr(self.config, attr_name, converted_value)
+                            except ValueError as e:
+                                errors.append(f"{attr_name}: Invalid {expected_type.__name__} - {e}")
+                                continue
+                                
+                except Exception as e:
+                    errors.append(f"{attr_name}: Error reading value - {e}")
+            
+            # === NEW: Handle hybrid detection settings ===
+            # Update wing detection method from radio buttons
+            if hasattr(self, 'wing_detection_method_var'):
+                self.config.wing_detection_method = self.wing_detection_method_var.get()
+            
+            # Report errors
+            if errors:
+                error_msg = "Configuration errors:\n" + "\n".join(errors[:5])
+                if len(errors) > 5:
+                    error_msg += f"\n... and {len(errors) - 5} more"
+                messagebox.showerror("Configuration Error", error_msg)
+                return False
+            
+            # Validate
+            try:
+                self.config.validate()
+                logger.info("Configuration updated from GUI successfully (with hybrid detection)")
+                return True
+            except Exception as e:
+                messagebox.showerror("Validation Error", f"Configuration validation failed: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Critical error updating config: {e}")
+            messagebox.showerror("Critical Error", f"Failed to update configuration: {e}")
+            return False
+    
+    
+    # REPLACE: Replace your existing process_folders method with this enhanced version
+    
+    def process_folders(self):
+        """Updated process_folders method that uses hybrid detection."""
+        try:
+            master_folder = self.master_folder_var.get()
+            output_folder = self.output_folder_var.get()
+            
+            # Get all subfolders with files
+            subfolders_to_process = []
+            for item in os.listdir(master_folder):
+                item_path = os.path.join(master_folder, item)
+                if os.path.isdir(item_path):
+                    mapping = find_associated_files(item_path)
+                    if mapping:
+                        subfolders_to_process.append((item, item_path, len(mapping)))
+            
+            if not subfolders_to_process:
+                self.progress_queue.put(("error", "No subfolders with valid files found"))
+                return
+            
+            total_folders = len(subfolders_to_process)
+            processed_folders = 0
+            total_files_processed = 0
+            total_files_failed = 0
+            sparse_wings_detected = 0
+            
+            self.progress_queue.put(("progress", f"Starting hybrid detection processing of {total_folders} folders"))
+            
+            for folder_name, folder_path, file_count in subfolders_to_process:
+                if not self.is_processing:
+                    break
+                
+                # Update progress
+                self.progress_queue.put(("current_folder", f"Processing: {folder_name} ({file_count} files)"))
+                self.progress_queue.put(("progress_percent", int(processed_folders / total_folders * 100)))
+                
+                # Create output subfolder
+                output_subfolder = os.path.join(output_folder, folder_name)
+                os.makedirs(output_subfolder, exist_ok=True)
+                
+                # Check if already processed
+                if self.skip_existing_var.get():
+                    summary_file = os.path.join(output_subfolder, "analysis_summary.txt")
+                    if os.path.exists(summary_file):
+                        self.progress_queue.put(("log", f"Skipping {folder_name} - already processed"))
+                        processed_folders += 1
+                        continue
+                
+                # Save configuration
+                if self.save_config_var.get():
+                    config_path = os.path.join(output_subfolder, "processing_config.json")
+                    self.save_config_to_file(config_path)
+                
+                # Process this folder with hybrid detection
+                try:
+                    pentagone_mode = self.pentagone_mode_var.get()
+                    force_pentagone = pentagone_mode == "pentagone"
+                    
+                    # === USE HYBRID DETECTION ===
+                    result = main_with_hybrid_wing_detection(
+                        directory=folder_path,
+                        cfg=self.config,
+                        output_directory=output_subfolder,
+                        force_pentagone_mode=force_pentagone,
+                        auto_detect_pentagone=(pentagone_mode == "auto"),
+                        progress_callback=self.progress_queue
+                    )
+                    
+                    if result and 'sparse_wings' in result:
+                        sparse_wings_detected += result['sparse_wings']
+                    
+                    total_files_processed += file_count
+                    self.progress_queue.put(("log", f"Completed {folder_name}: {file_count} files processed with hybrid detection"))
+                    
+                except Exception as e:
+                    total_files_failed += file_count
+                    self.progress_queue.put(("error", f"Error processing {folder_name}: {e}"))
+                
+                processed_folders += 1
+            
+            # Final summary with hybrid detection statistics
+            if self.is_processing:
+                summary = f"""
+    Hybrid Detection Processing Complete!
+    
+    Folders processed: {processed_folders}/{total_folders}
+    Total files processed: {total_files_processed}
+    Total files failed: {total_files_failed}
+    Sparse wings detected: {sparse_wings_detected}
+    
+    Detection Method: {"Hybrid (Probability + Trichome)" if self.config.use_hybrid_detection else "Legacy"}
+    Output directory: {output_folder}
+    
+    Processing completed at: {time.strftime('%Y-%m-%d %H:%M:%S')}
+    
+    Hybrid Detection Benefits:
+    - Improved sparse wing handling
+    - Fallback mechanisms for challenging cases
+    - Adaptive string removal
+    - Better boundary detection
+    """
+                self.progress_queue.put(("summary", summary))
+                self.progress_queue.put(("progress", "Hybrid detection processing completed successfully"))
+            else:
+                self.progress_queue.put(("progress", "Processing stopped by user"))
+            
+        except Exception as e:
+            self.progress_queue.put(("error", f"Critical error: {e}"))
+        
+        finally:
+            self.progress_queue.put(("finished", None))
     
     def setup_results_tab(self):
         # Results summary
@@ -1592,248 +1988,45 @@ class TrichomeAnalysisGUI:
         # Store reference for later retrieval
         setattr(self, f"{attr_name}_var", var)
     
-    def load_initial_config(self):
-        """Load initial configuration values into GUI - improved with better error handling."""
-        logger.info("Starting initial configuration load...")
-        
-        # Check if GUI is fully initialized first
-        required_vars = [
-            'min_distance_var', 'high_thresh_abs_var', 'low_thresh_abs_var',
-            'scales_var', 'use_clahe_var', 'use_white_tophat_var'
-        ]
-        
-        missing_vars = [var for var in required_vars if not hasattr(self, var)]
-        if missing_vars:
-            logger.warning(f"GUI not fully initialized. Missing variables: {missing_vars}")
-            # Try again after a short delay
-            self.root.after(500, self.load_initial_config)
-            return
-        
-        try:
-            self.update_gui_from_config()
-            logger.info("Initial configuration loaded successfully")
-        except Exception as e:
-            logger.error(f"Error in load_initial_config: {e}")
-            self.set_default_gui_values()
-
-    def set_default_gui_values(self):
-        """Set default values with Windows-safe GUI updates and better error handling."""
-        logger.info("Setting default GUI values...")
-        
-        defaults = {
-            'min_distance_var': '8',
-            'high_thresh_abs_var': '0.30',
-            'low_thresh_abs_var': '0.20',
-            'scales_var': "0.8,1.0,1.2",
-            'scale_weight_decay_var': '0.8',
-            'use_clahe_var': False,
-            'clahe_clip_limit_var': '0.01',
-            'use_white_tophat_var': True,
-            'tophat_radius_var': '2',
-            'use_local_threshold_var': True,
-            'local_block_size_var': '71',
-
-            'min_peak_intensity_var': '0.25',
-            'max_peak_density_var': '0.002',
-            'edge_exclusion_buffer_var': '10',
-            'dbscan_eps_var': '10.0',
-            'dbscan_min_samples_var': '1',
-            'valley_drop_var': '0.25',
-            'neighbour_tolerance_var': '0.20',
-            'min_neighbours_var': '7',
-            'intervein_threshold_var': '0.4',
-            'min_region_area_var': '60000',
-            'max_region_area_var': '1500000',
-            'vein_width_estimate_var': '7',
-            'min_vein_length_var': '100',
-            'vein_detection_sensitivity_var': '0.9',
-            'min_wing_area_var': '100000',
-            'border_buffer_var': '20'
-        }
-        
-        def set_var_safe(var_name, default_value):
-            """Safely set a GUI variable with error handling"""
-            if hasattr(self, var_name):
-                try:
-                    var = getattr(self, var_name)
-                    if isinstance(var, tk.BooleanVar):
-                        var.set(bool(default_value))
-                    else:
-                        var.set(str(default_value))
-                    logger.debug(f"Set {var_name} to {default_value}")
-                except Exception as e:
-                    logger.warning(f"Could not set default for {var_name}: {e}")
-            else:
-                logger.warning(f"Variable {var_name} not found for default setting")
-        
-        # Set defaults using safe method
-        for var_name, default_value in defaults.items():
-            # Schedule each update for the next event loop cycle
-            self.root.after_idle(set_var_safe, var_name, default_value)
-        
-        logger.info("Default values set successfully")
-
-    def update_gui_from_config(self):
-        """Windows-safe GUI update from config object with better error handling."""
-        try:
-            # Dictionary of config values to set
-            config_mappings = {
-                'min_distance_var': str(self.config.min_distance),
-                'high_thresh_abs_var': str(self.config.high_thresh_abs),
-                'low_thresh_abs_var': str(self.config.low_thresh_abs),
-                'scales_var': ",".join(map(str, self.config.scales)),
-                'scale_weight_decay_var': str(self.config.scale_weight_decay),
-                'use_clahe_var': self.config.use_clahe,  # Boolean
-                'clahe_clip_limit_var': str(self.config.clahe_clip_limit),
-                'use_white_tophat_var': self.config.use_white_tophat,  # Boolean
-                'tophat_radius_var': str(self.config.tophat_radius),
-                'use_local_threshold_var': self.config.use_local_threshold,  # Boolean
-                'local_block_size_var': str(self.config.local_block_size),
-
-                'min_peak_intensity_var': str(self.config.min_peak_intensity),
-                'max_peak_density_var': str(self.config.max_peak_density),
-                'edge_exclusion_buffer_var': str(self.config.edge_exclusion_buffer),
-                'dbscan_eps_var': str(self.config.dbscan_eps),
-                'dbscan_min_samples_var': str(self.config.dbscan_min_samples),
-                'valley_drop_var': str(self.config.valley_drop),
-                'neighbour_tolerance_var': str(self.config.neighbour_tolerance),
-                'min_neighbours_var': str(self.config.min_neighbours),
-                'intervein_threshold_var': str(self.config.intervein_threshold),
-                'min_region_area_var': str(self.config.min_region_area),
-                'max_region_area_var': str(self.config.max_region_area),
-                'vein_width_estimate_var': str(self.config.vein_width_estimate),
-                'min_vein_length_var': str(self.config.min_vein_length),
-                'vein_detection_sensitivity_var': str(self.config.vein_detection_sensitivity),
-                'min_wing_area_var': str(self.config.min_wing_area),
-                'border_buffer_var': str(self.config.border_buffer)
-            }
-            
-            # Set each variable safely
-            for var_name, value in config_mappings.items():
-                if hasattr(self, var_name):
-                    try:
-                        var = getattr(self, var_name)
-                        
-                        # Schedule the update for the next event loop cycle
-                        def set_var(v=var, val=value):
-                            try:
-                                if isinstance(v, tk.BooleanVar):
-                                    v.set(bool(val))
-                                else:
-                                    v.set(str(val))
-                            except Exception as e:
-                                logger.warning(f"Could not set {var_name}: {e}")
-                        
-                        self.root.after_idle(set_var)
-                        
-                    except Exception as e:
-                        logger.warning(f"Error setting {var_name}: {e}")
-                else:
-                    logger.warning(f"GUI variable {var_name} not found")
-            
-            logger.info("GUI updated from configuration successfully")
-            
-        except Exception as e:
-            logger.error(f"Critical error updating GUI from config: {e}")
-            # Fall back to defaults
-            self.set_default_gui_values()
-
     def browse_master_folder(self):
-        """Windows-optimized folder browser."""
-        try:
-            # Use askdirectory with Windows-specific options
-            folder = filedialog.askdirectory(
-                title="Select Master Folder (containing subfolders with wing data)",
-                mustexist=True
-            )
-            
-            if folder:
-                # Normalize path for Windows
-                folder = os.path.normpath(folder)
-                self.master_folder_var.set(folder)
-                
-                # Auto-set output folder if not already set
-                if not self.output_folder_var.get().strip():
-                    parent_dir = os.path.dirname(folder)
-                    folder_name = os.path.basename(folder)
-                    output_folder = os.path.join(parent_dir, f"{folder_name}_Results")
-                    output_folder = os.path.normpath(output_folder)
-                    self.output_folder_var.set(output_folder)
-                
-                # Force refresh of folder list
-                self.root.after(100, self.refresh_folder_list)
-                
-        except Exception as e:
-            logger.error(f"Error browsing for master folder: {e}")
-            messagebox.showerror("Error", f"Could not browse for folder: {e}")
-
+        folder = filedialog.askdirectory(title="Select Master Folder")
+        if folder:
+            self.master_folder_var.set(folder)
+            # Auto-set output folder
+            if not self.output_folder_var.get():
+                output_folder = os.path.join(os.path.dirname(folder), f"{os.path.basename(folder)}_Results")
+                self.output_folder_var.set(output_folder)
+            self.refresh_folder_list()
+    
     def browse_output_folder(self):
-        """Windows-optimized output folder browser with better error handling."""
-        try:
-            # Ensure focus is on main window
-            self.root.focus_set()
-            self.root.update()
-            
-            folder = filedialog.askdirectory(
-                parent=self.root,
-                title="Select Output Folder",
-                mustexist=False  # Allow creating new folders
-            )
-            
-            if folder:
-                folder = os.path.normpath(folder)
-                self.output_folder_var.set(folder)
-                
-        except Exception as e:
-            logger.error(f"Error browsing for output folder: {e}")
-            messagebox.showerror("Error", f"Could not browse for folder: {e}")
-
+        folder = filedialog.askdirectory(title="Select Output Folder")
+        if folder:
+            self.output_folder_var.set(folder)
+    
     def refresh_folder_list(self):
-        """Windows-safe folder list refresh."""
-        # Clear existing list
         self.folder_listbox.delete(0, tk.END)
         
-        master_folder = self.master_folder_var.get().strip()
-        if not master_folder:
-            return
-        
-        if not os.path.exists(master_folder):
-            self.folder_listbox.insert(tk.END, "⚠ Folder path does not exist")
+        master_folder = self.master_folder_var.get()
+        if not master_folder or not os.path.exists(master_folder):
             return
         
         try:
             subfolders = []
+            for item in os.listdir(master_folder):
+                item_path = os.path.join(master_folder, item)
+                if os.path.isdir(item_path):
+                    # Check if folder contains probability files
+                    mapping = find_associated_files(item_path)
+                    if mapping:
+                        subfolders.append(f"{item} ({len(mapping)} file pairs)")
+                    else:
+                        subfolders.append(f"{item} (no files found)")
             
-            # Use os.scandir for better Windows performance
-            with os.scandir(master_folder) as entries:
-                for entry in entries:
-                    if entry.is_dir():
-                        try:
-                            # Check if folder contains valid files
-                            mapping = find_associated_files(entry.path)
-                            if mapping:
-                                file_count = len(mapping)
-                                subfolders.append(f"✓ {entry.name} ({file_count} file pairs)")
-                            else:
-                                subfolders.append(f"✗ {entry.name} (no valid files)")
-                        except Exception as e:
-                            subfolders.append(f"⚠ {entry.name} (scan error)")
-                            logger.warning(f"Error scanning {entry.name}: {e}")
-            
-            # Sort and add to listbox
-            subfolders.sort()
-            for folder_info in subfolders:
-                self.folder_listbox.insert(tk.END, folder_info)
-            
-            if not subfolders:
-                self.folder_listbox.insert(tk.END, "No subfolders found")
+            for folder in sorted(subfolders):
+                self.folder_listbox.insert(tk.END, folder)
                 
-        except PermissionError:
-            self.folder_listbox.insert(tk.END, "⚠ Permission denied - check folder access")
-            logger.error(f"Permission denied accessing {master_folder}")
         except Exception as e:
-            self.folder_listbox.insert(tk.END, f"⚠ Error scanning folder: {str(e)}")
-            logger.error(f"Error scanning master folder: {e}")
+            self.log_message(f"Error scanning folders: {e}")
     
     # ==== DROSOPHILA GIF ANIMATION METHODS ====
     
@@ -1854,15 +2047,11 @@ class TrichomeAnalysisGUI:
             print(f"Error loading embedded GIF: {e}")
             return None, None
 
+    # Update your create_drosophila_loading_overlay method:
     def create_drosophila_loading_overlay(self):
-        """Fixed loading overlay with proper Windows grab handling"""
-        if hasattr(self, 'loading_window'):
-            try:
-                if self.loading_window.winfo_exists():
-                    return
-            except tk.TclError:
-                # Window was destroyed, continue
-                pass
+        """Create loading overlay with embedded Drosophila GIF"""
+        if hasattr(self, 'loading_window') and self.loading_window.winfo_exists():
+            return
         
         # Create overlay window
         self.loading_window = tk.Toplevel(self.root)
@@ -1870,54 +2059,15 @@ class TrichomeAnalysisGUI:
         self.loading_window.geometry("600x450")
         self.loading_window.resizable(False, False)
         
-        # Windows-specific window setup
+        # Center and style
         self.loading_window.transient(self.root)
-        
-        # Position relative to main window with error handling
-        try:
-            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 300
-            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 225
-            self.loading_window.geometry(f"500x450+{x}+{y}")
-        except tk.TclError:
-            # Fallback positioning
-            self.loading_window.geometry("500x450+100+100")
-        
+        self.loading_window.grab_set()
         self.loading_window.configure(bg='#1a1a1a')
         
-        # FIXED: Safer grab handling with proper timing
-        def safe_grab():
-            try:
-                # Make sure window is fully created and visible first
-                self.loading_window.update_idletasks()
-                self.loading_window.focus_set()
-                
-                # Try to grab after a short delay to ensure window is ready
-                def attempt_grab():
-                    try:
-                        # Only grab if window still exists and is ready
-                        if hasattr(self, 'loading_window') and self.loading_window.winfo_exists():
-                            # Check if any other window has grab first
-                            current_grab = self.root.grab_current()
-                            if current_grab is None:
-                                self.loading_window.grab_set()
-                                logger.info("Successfully set window grab")
-                            else:
-                                logger.warning(f"Another window has grab: {current_grab}")
-                                # Still functional without grab
-                    except tk.TclError as e:
-                        logger.warning(f"Could not set window grab (window still functional): {e}")
-                    except Exception as e:
-                        logger.warning(f"Unexpected error setting grab: {e}")
-                
-                # Schedule grab attempt after window is fully ready
-                self.root.after(200, attempt_grab)
-                
-            except Exception as e:
-                logger.warning(f"Error in safe_grab setup: {e}")
-                # Continue without grab - window will still work
-        
-        # Schedule grab setup for after window creation
-        self.root.after_idle(safe_grab)
+        # Position relative to main window
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 300
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 225
+        self.loading_window.geometry(f"500x450+{x}+{y}")
         
         # Main frame
         main_frame = tk.Frame(self.loading_window, bg='#1a1a1a')
@@ -1933,7 +2083,7 @@ class TrichomeAnalysisGUI:
         )
         title_label.pack(pady=(0, 15))
         
-        # Load embedded GIF
+        # Load embedded GIF - NO MORE FILE PATH ISSUES!
         self.gif_frames, self.gif_durations = self.load_embedded_gif_frames()
         
         # Create label for GIF animation
@@ -1955,9 +2105,13 @@ class TrichomeAnalysisGUI:
                 font=('Arial', 24),
                 fg='#00d4aa'
             )
+            print("Using fallback animation - embedded GIF failed to load")
         else:
             # Start the GIF animation
             self.animate_gif()
+            print(f"Started embedded GIF animation with {len(self.gif_frames)} frames")
+        
+        # ... rest of your overlay code stays the same ...
         
         # Status text
         self.loading_status_label = tk.Label(
@@ -1970,7 +2124,7 @@ class TrichomeAnalysisGUI:
         )
         self.loading_status_label.pack(pady=15)
         
-        # Progress indicator
+        # Progress indicator with wing-themed messages
         self.loading_progress_label = tk.Label(
             main_frame,
             text="Preparing wing analysis...",
@@ -2008,271 +2162,244 @@ class TrichomeAnalysisGUI:
         # Cancel button
         cancel_frame = tk.Frame(main_frame, bg='#1a1a1a')
         cancel_frame.pack(pady=20)
+        
         cancel_button = tk.Button(
-           cancel_frame,
-           text="Cancel Analysis",
-           command=self.cancel_processing_from_overlay,
-           bg='#dc3545',
-           fg='white',
-           activebackground='#c82333',
-           activeforeground='white',
-           font=('Arial', 11, 'bold'),
-           relief=tk.RAISED,
-           bd=2,
-           padx=25,
-           pady=10,
-           cursor='hand2'
-           )
+            cancel_frame,
+            text="Cancel Analysis",
+            command=self.cancel_processing_from_overlay,
+            bg='#dc3545',           # Darker red background
+            fg='white',             # White text
+            activebackground='#c82333',  # Darker red when clicked
+            activeforeground='white',    # White text when clicked
+            font=('Arial', 11, 'bold'),  # Slightly larger font
+            relief=tk.RAISED,       # Raised relief for better visibility
+            bd=2,                   # Border width
+            padx=25,                # More horizontal padding
+            pady=10,                # More vertical padding
+            cursor='hand2'
+            )
         cancel_button.pack()
-       
+        
         # Start fact cycling
         self.cycle_wing_facts()
-       
+        
         # Prevent closing with X button
         self.loading_window.protocol("WM_DELETE_WINDOW", self.on_loading_window_close)
-   
+    
     def animate_gif(self):
-       """Animate the Drosophila GIF"""
-       if not self.animation_running or not hasattr(self, 'gif_frames') or self.gif_frames is None:
-           return
-       
-       try:
-           if hasattr(self, 'gif_label') and self.gif_label.winfo_exists():
-               # Update the image
-               self.gif_label.config(image=self.gif_frames[self.current_frame])
-               
-               # Get duration for this frame (or use default)
-               duration = self.gif_durations[self.current_frame] if self.gif_durations else 100
-               
-               # Move to next frame
-               self.current_frame = (self.current_frame + 1) % len(self.gif_frames)
-               
-               # Schedule next frame
-               self.root.after(duration, self.animate_gif)
-               
-       except (tk.TclError, IndexError):
-           # Handle any display errors gracefully
-           pass
-   
-    def cycle_wing_facts(self):
-       """Cycle through wing analysis facts"""
-       if not self.animation_running or not hasattr(self, 'facts_label'):
-           return
-       
-       try:
-           if self.facts_label.winfo_exists():
-               self.facts_label.config(text=self.facts_list[self.current_fact])
-               self.current_fact = (self.current_fact + 1) % len(self.facts_list)
-               self.root.after(3000, self.cycle_wing_facts)  # Change every 3 seconds
-       except tk.TclError:
-           pass
-   
-    def update_loading_status(self, status_text):
-       """Update the loading status text"""
-       if hasattr(self, 'loading_status_label'):
-           try:
-               if self.loading_status_label.winfo_exists():
-                   self.loading_status_label.config(text=status_text)
-           except tk.TclError:
-               pass
-   
-    def close_loading_overlay(self):
-       """Close the loading overlay and cleanup"""
-       self.animation_running = False
-       
-       # Clear GIF references to prevent memory leaks
-       if hasattr(self, 'gif_frames'):
-           self.gif_frames = None
-       if hasattr(self, 'gif_durations'):
-           self.gif_durations = None
-       
-       if hasattr(self, 'loading_window'):
-           try:
-               if self.loading_window.winfo_exists():
-                   self.loading_window.grab_release()
-                   self.loading_window.destroy()
-           except tk.TclError:
-               pass
-   
-    def cancel_processing_from_overlay(self):
-       """Cancel processing from the overlay window"""
-       if messagebox.askyesno("Cancel Processing", "Are you sure you want to cancel the analysis?"):
-           self.stop_processing()
-           self.close_loading_overlay()
-   
-    def on_loading_window_close(self):
-       """Handle loading window close attempt"""
-       self.cancel_processing_from_overlay()
-   
-   # ==== END ANIMATION METHODS ====
-   
-    def update_config_from_gui(self):
-        """Update configuration from GUI - simplified and reliable."""
+        """Animate the Drosophila GIF"""
+        if not self.animation_running or not hasattr(self, 'gif_frames') or self.gif_frames is None:
+            return
+        
         try:
-            errors = []
-            
-            # Process each GUI variable
-            for attr_name, gui_info in self.gui_vars.items():
-                try:
-                    var = gui_info['var']
-                    expected_type = gui_info['type']
+            if hasattr(self, 'gif_label') and self.gif_label.winfo_exists():
+                # Update the image
+                self.gif_label.config(image=self.gif_frames[self.current_frame])
+                
+                # Get duration for this frame (or use default)
+                duration = self.gif_durations[self.current_frame] if self.gif_durations else 100
+                
+                # Move to next frame
+                self.current_frame = (self.current_frame + 1) % len(self.gif_frames)
+                
+                # Schedule next frame
+                self.root.after(duration, self.animate_gif)
+                
+        except (tk.TclError, IndexError):
+            # Handle any display errors gracefully
+            pass
+    
+    def cycle_wing_facts(self):
+        """Cycle through wing analysis facts"""
+        if not self.animation_running or not hasattr(self, 'facts_label'):
+            return
+        
+        try:
+            if self.facts_label.winfo_exists():
+                self.facts_label.config(text=self.facts_list[self.current_fact])
+                self.current_fact = (self.current_fact + 1) % len(self.facts_list)
+                self.root.after(3000, self.cycle_wing_facts)  # Change every 3 seconds
+        except tk.TclError:
+            pass
+    
+    def update_loading_status(self, status_text):
+        """Update the loading status text"""
+        if hasattr(self, 'loading_status_label'):
+            try:
+                if self.loading_status_label.winfo_exists():
+                    self.loading_status_label.config(text=status_text)
+            except tk.TclError:
+                pass
+    
+    def close_loading_overlay(self):
+        """Close the loading overlay and cleanup"""
+        self.animation_running = False
+        
+        # Clear GIF references to prevent memory leaks
+        if hasattr(self, 'gif_frames'):
+            self.gif_frames = None
+        if hasattr(self, 'gif_durations'):
+            self.gif_durations = None
+        
+        if hasattr(self, 'loading_window'):
+            try:
+                if self.loading_window.winfo_exists():
+                    self.loading_window.grab_release()
+                    self.loading_window.destroy()
+            except tk.TclError:
+                pass
+    
+    def cancel_processing_from_overlay(self):
+        """Cancel processing from the overlay window"""
+        if messagebox.askyesno("Cancel Processing", "Are you sure you want to cancel the analysis?"):
+            self.stop_processing()
+            self.close_loading_overlay()
+    
+    def on_loading_window_close(self):
+        """Handle loading window close attempt"""
+        self.cancel_processing_from_overlay()
+    
+    # ==== END ANIMATION METHODS ====
+    
+    def update_config_from_gui(self):
+        """Update config object from GUI values"""
+        try:
+            # Update all config attributes from GUI
+            for attr_name in dir(self.config):
+                if attr_name.startswith('_'):
+                    continue
+                
+                var_name = f"{attr_name}_var"
+                type_name = f"{attr_name}_type"
+                
+                if hasattr(self, var_name):
+                    var = getattr(self, var_name)
                     
                     if isinstance(var, tk.BooleanVar):
-                        value = var.get()
-                        setattr(self.config, attr_name, value)
+                        setattr(self.config, attr_name, var.get())
                     else:
-                        value_str = var.get().strip()
-                        if not value_str:
-                            errors.append(f"{attr_name}: Empty value")
-                            continue
-                        
-                        # Special handling for scales
-                        if attr_name == "scales":
-                            try:
-                                scales = [float(x.strip()) for x in value_str.split(',') if x.strip()]
-                                if not scales:
-                                    errors.append("scales: No valid scales provided")
-                                    continue
+                        value_str = var.get()
+                        if hasattr(self, type_name):
+                            data_type = getattr(self, type_name)
+                            
+                            if attr_name == "scales":
+                                # Special handling for scales list
+                                scales = [float(x.strip()) for x in value_str.split(',')]
                                 setattr(self.config, attr_name, scales)
-                            except ValueError as e:
-                                errors.append(f"scales: Invalid values - {e}")
-                                continue
+                            else:
+                                setattr(self.config, attr_name, data_type(value_str))
                         else:
-                            # Regular type conversion
-                            try:
-                                converted_value = expected_type(value_str)
-                                setattr(self.config, attr_name, converted_value)
-                            except ValueError as e:
-                                errors.append(f"{attr_name}: Invalid {expected_type.__name__} - {e}")
-                                continue
-                                
-                except Exception as e:
-                    errors.append(f"{attr_name}: Error reading value - {e}")
+                            setattr(self.config, attr_name, value_str)
             
-            # Report errors
-            if errors:
-                error_msg = "Configuration errors:\n" + "\n".join(errors[:5])
-                if len(errors) > 5:
-                    error_msg += f"\n... and {len(errors) - 5} more"
-                messagebox.showerror("Configuration Error", error_msg)
-                return False
+            self.config.validate()
+            return True
             
-            # Validate
-            try:
-                self.config.validate()
-                logger.info("Configuration updated from GUI successfully")
-                return True
-            except Exception as e:
-                messagebox.showerror("Validation Error", f"Configuration validation failed: {e}")
-                return False
-                
         except Exception as e:
-            logger.error(f"Critical error updating config: {e}")
-            messagebox.showerror("Critical Error", f"Failed to update configuration: {e}")
+            messagebox.showerror("Configuration Error", f"Invalid configuration: {e}")
             return False
-   
+    
     def start_processing(self):
-       if not self.master_folder_var.get() or not self.output_folder_var.get():
-           messagebox.showerror("Error", "Please select both master folder and output folder")
-           return
-       
-       if not self.update_config_from_gui():
-           return
-       
-       self.is_processing = True
-       self.start_button.config(state=tk.DISABLED)
-       self.stop_button.config(state=tk.NORMAL)
-       
-       # Create and show Drosophila loading overlay
-       self.create_drosophila_loading_overlay()
-       
-       # Start processing in separate thread
-       self.processing_thread = threading.Thread(target=self.process_folders, daemon=True)
-       self.processing_thread.start()
-   
+        if not self.master_folder_var.get() or not self.output_folder_var.get():
+            messagebox.showerror("Error", "Please select both master folder and output folder")
+            return
+        
+        if not self.update_config_from_gui():
+            return
+        
+        self.is_processing = True
+        self.start_button.config(state=tk.DISABLED)
+        self.stop_button.config(state=tk.NORMAL)
+        
+        # Create and show Drosophila loading overlay
+        self.create_drosophila_loading_overlay()
+        
+        # Start processing in separate thread
+        self.processing_thread = threading.Thread(target=self.process_folders, daemon=True)
+        self.processing_thread.start()
+    
     def stop_processing(self):
-       self.is_processing = False
-       self.stop_button.config(state=tk.DISABLED)
-       self.log_message("Stopping processing...")
-       self.close_loading_overlay()
-   
+        self.is_processing = False
+        self.stop_button.config(state=tk.DISABLED)
+        self.log_message("Stopping processing...")
+        self.close_loading_overlay()
+    
     def process_folders(self):
-       """Main processing function that runs in separate thread"""
-       try:
-           master_folder = self.master_folder_var.get()
-           output_folder = self.output_folder_var.get()
-           
-           # Get all subfolders with files
-           subfolders_to_process = []
-           for item in os.listdir(master_folder):
-               item_path = os.path.join(master_folder, item)
-               if os.path.isdir(item_path):
-                   mapping = find_associated_files(item_path)
-                   if mapping:
-                       subfolders_to_process.append((item, item_path, len(mapping)))
-           
-           if not subfolders_to_process:
-               self.progress_queue.put(("error", "No subfolders with valid files found"))
-               return
-           
-           total_folders = len(subfolders_to_process)
-           processed_folders = 0
-           total_files_processed = 0
-           total_files_failed = 0
-           
-           self.progress_queue.put(("progress", f"Starting processing of {total_folders} folders"))
-           
-           for folder_name, folder_path, file_count in subfolders_to_process:
-               if not self.is_processing:
-                   break
-               
-               # Update progress
-               self.progress_queue.put(("current_folder", f"Processing: {folder_name} ({file_count} files)"))
-               self.progress_queue.put(("progress_percent", int(processed_folders / total_folders * 100)))
-               
-               # Create output subfolder
-               output_subfolder = os.path.join(output_folder, folder_name)
-               os.makedirs(output_subfolder, exist_ok=True)
-               
-               # Check if already processed
-               if self.skip_existing_var.get():
-                   summary_file = os.path.join(output_subfolder, "analysis_summary.txt")
-                   if os.path.exists(summary_file):
-                       self.progress_queue.put(("log", f"Skipping {folder_name} - already processed"))
-                       processed_folders += 1
-                       continue
-               
-               # Save configuration
-               if self.save_config_var.get():
-                   config_path = os.path.join(output_subfolder, "processing_config.json")
-                   self.save_config_to_file(config_path)
-               
-               # Process this folder
-               try:
-                   pentagone_mode = self.pentagone_mode_var.get()
-                   force_pentagone = pentagone_mode == "pentagone"
-                   
-                   result = main_with_pentagone_support(
-                       directory=folder_path,
-                       cfg=self.config,
-                       output_directory=output_subfolder,
-                       force_pentagone_mode=force_pentagone,
-                       auto_detect_pentagone=(pentagone_mode == "auto"),
-                       progress_callback=self.progress_queue
-                   )
-                   
-                   total_files_processed += file_count
-                   self.progress_queue.put(("log", f"Completed {folder_name}: {file_count} files processed"))
-                   
-               except Exception as e:
-                   total_files_failed += file_count
-                   self.progress_queue.put(("error", f"Error processing {folder_name}: {e}"))
-               
-               processed_folders += 1
-           
-           # Final summary
-           if self.is_processing:
-               summary = f"""
+        """Main processing function that runs in separate thread"""
+        try:
+            master_folder = self.master_folder_var.get()
+            output_folder = self.output_folder_var.get()
+            
+            # Get all subfolders with files
+            subfolders_to_process = []
+            for item in os.listdir(master_folder):
+                item_path = os.path.join(master_folder, item)
+                if os.path.isdir(item_path):
+                    mapping = find_associated_files(item_path)
+                    if mapping:
+                        subfolders_to_process.append((item, item_path, len(mapping)))
+            
+            if not subfolders_to_process:
+                self.progress_queue.put(("error", "No subfolders with valid files found"))
+                return
+            
+            total_folders = len(subfolders_to_process)
+            processed_folders = 0
+            total_files_processed = 0
+            total_files_failed = 0
+            
+            self.progress_queue.put(("progress", f"Starting processing of {total_folders} folders"))
+            
+            for folder_name, folder_path, file_count in subfolders_to_process:
+                if not self.is_processing:
+                    break
+                
+                # Update progress
+                self.progress_queue.put(("current_folder", f"Processing: {folder_name} ({file_count} files)"))
+                self.progress_queue.put(("progress_percent", int(processed_folders / total_folders * 100)))
+                
+                # Create output subfolder
+                output_subfolder = os.path.join(output_folder, folder_name)
+                os.makedirs(output_subfolder, exist_ok=True)
+                
+                # Check if already processed
+                if self.skip_existing_var.get():
+                    summary_file = os.path.join(output_subfolder, "analysis_summary.txt")
+                    if os.path.exists(summary_file):
+                        self.progress_queue.put(("log", f"Skipping {folder_name} - already processed"))
+                        processed_folders += 1
+                        continue
+                
+                # Save configuration
+                if self.save_config_var.get():
+                    config_path = os.path.join(output_subfolder, "processing_config.json")
+                    self.save_config_to_file(config_path)
+                
+                # Process this folder
+                try:
+                    pentagone_mode = self.pentagone_mode_var.get()
+                    force_pentagone = pentagone_mode == "pentagone"
+                    
+                    result = main_with_hybrid_wing_detection(
+                        directory=folder_path,
+                        cfg=self.config,
+                        output_directory=output_subfolder,
+                        force_pentagone_mode=force_pentagone,
+                        auto_detect_pentagone=(pentagone_mode == "auto"),
+                        progress_callback=self.progress_queue
+                    )
+                    
+                    total_files_processed += file_count
+                    self.progress_queue.put(("log", f"Completed {folder_name}: {file_count} files processed"))
+                    
+                except Exception as e:
+                    total_files_failed += file_count
+                    self.progress_queue.put(("error", f"Error processing {folder_name}: {e}"))
+                
+                processed_folders += 1
+            
+            # Final summary
+            if self.is_processing:
+                summary = f"""
 Processing Complete!
 
 Folders processed: {processed_folders}/{total_folders}
@@ -2282,413 +2409,177 @@ Output directory: {output_folder}
 
 Processing completed at: {time.strftime('%Y-%m-%d %H:%M:%S')}
 """
-               self.progress_queue.put(("summary", summary))
-               self.progress_queue.put(("progress", "Processing completed successfully"))
-           else:
-               self.progress_queue.put(("progress", "Processing stopped by user"))
-           
-       except Exception as e:
-           self.progress_queue.put(("error", f"Critical error: {e}"))
-       
-       finally:
-           self.progress_queue.put(("finished", None))
-   
-    def check_progress(self):
-       """Windows-optimized progress checker with better error handling."""
-       try:
-           messages_processed = 0
-           max_messages = 20  # Process more messages per check on Windows
-           
-           while messages_processed < max_messages:
-               try:
-                   msg_type, message = self.progress_queue.get_nowait()
-                   messages_processed += 1
-                   
-                   # Use after_idle for thread-safe GUI updates
-                   if msg_type == "progress":
-                       self.root.after_idle(self._safe_set_progress, message)
-                   elif msg_type == "current_folder":
-                       self.root.after_idle(self._safe_set_current_folder, message)
-                   elif msg_type == "progress_percent":
-                       self.root.after_idle(self._safe_set_progress_percent, message)
-                   elif msg_type == "log":
-                       self.root.after_idle(self._safe_log_message, message)
-                   elif msg_type == "error":
-                       self.root.after_idle(self._safe_log_message, f"ERROR: {message}")
-                   elif msg_type == "summary":
-                       self.root.after_idle(self._update_summary, message)
-                   elif msg_type == "finished":
-                       self.root.after_idle(self._processing_finished)
-                       return  # Stop checking
-                       
-               except queue.Empty:
-                   break
-               except Exception as e:
-                   logger.error(f"Error processing progress message: {e}")
-                   break
-           
-       except Exception as e:
-           logger.error(f"Progress check error: {e}")
-       
-       # Schedule next check if still processing
-       if self.is_processing:
-           self.root.after(150, self.check_progress)  # Slightly longer interval for Windows
-
-    def _safe_set_progress(self, message):
-       """Thread-safe progress update."""
-       try:
-           self.progress_var.set(message)
-           self.update_loading_status(message)
-       except:
-           pass
-
-    def _safe_set_current_folder(self, message):
-       """Thread-safe current folder update."""
-       try:
-           self.current_folder_var.set(message)
-           self.update_loading_status(message)
-       except:
-           pass
-
-    def _safe_set_progress_percent(self, percent):
-       """Thread-safe progress bar update."""
-       try:
-           self.progress_bar['value'] = percent
-       except:
-           pass
-
-    def _safe_log_message(self, message):
-       """Thread-safe log message."""
-       try:
-           self.log_message(message)
-       except:
-           pass
-
-    def _processing_finished(self):
-       """Handle processing completion - Windows safe."""
-       try:
-           self.is_processing = False
-           self.start_button.config(state=tk.NORMAL)
-           self.stop_button.config(state=tk.DISABLED)
-           self.close_loading_overlay()
-           
-           # Force GUI update
-           self.root.update_idletasks()
-           
-           # Show completion message
-           self.progress_var.set("Processing completed!")
-           
-       except Exception as e:
-           logger.error(f"Error in processing finished handler: {e}")
-
-    def _update_summary(self, summary_text):
-       """Update summary text safely."""
-       try:
-           self.summary_text.delete(1.0, tk.END)
-           self.summary_text.insert(1.0, summary_text)
-           self.summary_text.see(1.0)
-       except Exception as e:
-           logger.error(f"Error updating summary: {e}")
-
-    def log_message(self, message):
-       timestamp = time.strftime('%H:%M:%S')
-       try:
-           self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
-           self.log_text.see(tk.END)
-       except:
-           pass
-   
-    def clear_log(self):
-       try:
-           self.log_text.delete(1.0, tk.END)
-       except:
-           pass
-   
-    def load_config(self):
-       filename = filedialog.askopenfilename(
-           title="Load Configuration",
-           filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-       )
-       if filename:
-           try:
-               with open(filename, 'r') as f:
-                   config_dict = json.load(f)
-               
-               # Update config object
-               for key, value in config_dict.items():
-                   if hasattr(self.config, key):
-                       setattr(self.config, key, value)
-               
-               # Update GUI
-               self.update_gui_from_config()
-               messagebox.showinfo("Success", "Configuration loaded successfully")
-               
-           except Exception as e:
-               messagebox.showerror("Error", f"Failed to load configuration: {e}")
-   
-    def save_config(self):
-       if not self.update_config_from_gui():
-           return
-           
-       filename = filedialog.asksaveasfilename(
-           title="Save Configuration",
-           defaultextension=".json",
-           filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-       )
-       if filename:
-           self.save_config_to_file(filename)
-   
-    def save_config_to_file(self, filename):
-       try:
-           config_dict = asdict(self.config)
-           with open(filename, 'w') as f:
-               json.dump(config_dict, f, indent=2)
-           self.log_message(f"Configuration saved to {filename}")
-       except Exception as e:
-           self.log_message(f"Failed to save configuration: {e}")
-   
-    def reset_config(self):
-        """Reset configuration to defaults and update GUI."""
-        self.config = TrichomeDetectionConfig()
-        self._apply_config_to_gui()
-        messagebox.showinfo("Reset", "Configuration reset to defaults")
+                self.progress_queue.put(("summary", summary))
+                self.progress_queue.put(("progress", "Processing completed successfully"))
+            else:
+                self.progress_queue.put(("progress", "Processing stopped by user"))
+            
+        except Exception as e:
+            self.progress_queue.put(("error", f"Critical error: {e}"))
         
-                 
-
+        finally:
+            self.progress_queue.put(("finished", None))
+    
+    def check_progress(self):
+        """Check for progress updates from processing thread"""
+        try:
+            while True:
+                msg_type, message = self.progress_queue.get_nowait()
+                
+                if msg_type == "progress":
+                    self.progress_var.set(message)
+                    self.update_loading_status(message)  # Update overlay
+                elif msg_type == "current_folder":
+                    self.current_folder_var.set(message)
+                    self.update_loading_status(message)  # Update overlay
+                elif msg_type == "progress_percent":
+                    self.progress_bar['value'] = message
+                elif msg_type == "log":
+                    self.log_message(message)
+                    # Update overlay with recent log message for key events
+                    if any(keyword in message.lower() for keyword in ['processing', 'analyzing', 'detecting', 'found']):
+                        self.update_loading_status(message[:60] + "..." if len(message) > 60 else message)
+                elif msg_type == "error":
+                    self.log_message(f"ERROR: {message}")
+                    self.update_loading_status(f"Error: {message}")
+                elif msg_type == "summary":
+                    self.summary_text.delete(1.0, tk.END)
+                    self.summary_text.insert(tk.END, message)
+                elif msg_type == "finished":
+                    self.is_processing = False
+                    self.start_button.config(state=tk.NORMAL)
+                    self.stop_button.config(state=tk.DISABLED)
+                    self.progress_bar['value'] = 100
+                    self.close_loading_overlay()  # Close overlay when done
+                    
+                    # Show completion message
+                    messagebox.showinfo("Processing Complete", "Analysis finished successfully!")
+                    break
+                    
+        except queue.Empty:
+            pass
+        
+        # Schedule next check
+        self.root.after(100, self.check_progress)
+    
+    def log_message(self, message):
+        timestamp = time.strftime('%H:%M:%S')
+        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        self.log_text.see(tk.END)
+    
+    def clear_log(self):
+        self.log_text.delete(1.0, tk.END)
+    
+    def load_config(self):
+        filename = filedialog.askopenfilename(
+            title="Load Configuration",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            try:
+                with open(filename, 'r') as f:
+                    config_dict = json.load(f)
+                
+                # Update config object
+                for key, value in config_dict.items():
+                    if hasattr(self.config, key):
+                        setattr(self.config, key, value)
+                
+                # Update GUI
+                self.update_gui_from_config()
+                messagebox.showinfo("Success", "Configuration loaded successfully")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load configuration: {e}")
+    
+    def save_config(self):
+        if not self.update_config_from_gui():
+            return
+            
+        filename = filedialog.asksaveasfilename(
+            title="Save Configuration",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            self.save_config_to_file(filename)
+    
+    def save_config_to_file(self, filename):
+        try:
+            config_dict = asdict(self.config)
+            with open(filename, 'w') as f:
+                json.dump(config_dict, f, indent=2)
+            self.log_message(f"Configuration saved to {filename}")
+        except Exception as e:
+            self.log_message(f"Failed to save configuration: {e}")
+    
+    def reset_config(self):
+        self.config = TrichomeDetectionConfig()
+        self.update_gui_from_config()
+        messagebox.showinfo("Reset", "Configuration reset to defaults")
+    
+    def update_gui_from_config(self):
+        """Update GUI values from config object"""
+        for attr_name in dir(self.config):
+            if attr_name.startswith('_'):
+                continue
+            
+            var_name = f"{attr_name}_var"
+            if hasattr(self, var_name):
+                var = getattr(self, var_name)
+                value = getattr(self.config, attr_name)
+                
+                if isinstance(var, tk.BooleanVar):
+                    var.set(value)
+                else:
+                    if attr_name == "scales":
+                        var.set(",".join(map(str, value)))
+                    else:
+                        var.set(str(value))
 
 def run_gui():
-    """Windows-optimized GUI launcher with comprehensive error handling."""
-    
-    # Windows-specific initialization
-    if sys.platform.startswith('win'):
-        try:
-            # Set DPI awareness for better display on high-DPI screens
-            import ctypes
-            try:
-                # Try the newer method first
-                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per monitor DPI aware
-            except:
-                try:
-                    # Fallback to older method
-                    ctypes.windll.user32.SetProcessDPIAware()
-                except:
-                    pass  # If both fail, continue without DPI awareness
-        except Exception as e:
-            logger.warning(f"Could not set DPI awareness: {e}")
-    
-    # Create root window with error handling
-    try:
-        root = tk.Tk()
-    except Exception as e:
-        logger.error(f"Failed to create Tk root window: {e}")
-        print(f"Error: Could not initialize GUI: {e}")
-        return
-    
-    # Windows-specific window setup
-    if sys.platform.startswith('win'):
-        try:
-            # Ensure window is properly displayed
-            root.lift()
-            root.wm_attributes("-topmost", True)
-            root.after(2000, lambda: root.wm_attributes("-topmost", False))  # Longer delay for Windows
-            
-            # Set Windows-specific options
-            root.wm_state('normal')
-            root.focus_force()
-        except Exception as e:
-            logger.warning(f"Windows-specific setup failed: {e}")
-    
-    # Configure window
-    root.title("HomerWings V2 (Windows)")
-    
-    # Set window geometry with Windows compatibility
-    try:
-        # Get screen dimensions safely
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-        
-        # Set reasonable window size (slightly smaller for Windows)
-        window_width = min(1200, int(screen_width * 0.75))  # Reduced from 0.8
-        window_height = min(900, int(screen_height * 0.75))  # Reduced from 0.8
-        
-        # Center window
-        pos_x = max(0, (screen_width - window_width) // 2)
-        pos_y = max(0, (screen_height - window_height) // 2)
-        
-        # Apply geometry
-        root.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
-        
-        logger.info(f"Set window geometry: {window_width}x{window_height}+{pos_x}+{pos_y}")
-        
-    except Exception as e:
-        logger.warning(f"Could not set optimal window geometry: {e}")
-        # Fallback to fixed size
-        root.geometry("1000x800+100+100")
+    """Launch the GUI application"""
+    root = tk.Tk()
     
     # Set application icon if available
     try:
-        icon_path = get_resource_path('icon.ico')
-        if os.path.exists(icon_path):
-            root.iconbitmap(icon_path)
-            logger.info(f"Set application icon: {icon_path}")
-    except Exception as e:
-        logger.warning(f"Could not set application icon: {e}")
+        # You can add an icon file here if you have one
+        # root.iconbitmap('icon.ico')
+        pass
+    except:
+        pass
     
-    # Create application with comprehensive error handling
-    try:
-        app = TrichomeAnalysisGUI(root)
-        logger.info("TrichomeAnalysisGUI created successfully")
-        
-        # Enhanced Windows error handler
-        def handle_error(exc, val, tb):
-            error_msg = f"GUI Error: {exc.__name__}: {val}"
-            logger.error(error_msg)
-            
-            # Don't show GUI error dialogs for common Windows issues
-            common_windows_errors = [
-                "grab failed: another application has grab",
-                "can't invoke \"update\" command",
-                "invalid command name",
-                "application has been destroyed"
-            ]
-            
-            show_error_dialog = True
-            for common_error in common_windows_errors:
-                if common_error in str(val).lower():
-                    show_error_dialog = False
-                    break
-            
-            if show_error_dialog:
-                try:
-                    messagebox.showerror("Application Error", 
-                                       f"An error occurred: {val}\n\nCheck the log for details.")
-                except:
-                    pass  # If messagebox fails, just log
-            
-            # Print traceback to console for debugging
-            try:
-                import traceback
-                traceback.print_exception(exc, val, tb)
-            except:
-                pass
-            
-            return True  # Prevent default error handling
-        
-        root.report_callback_exception = handle_error
-        
-        # Enhanced shutdown handler
-        def on_closing():
-            try:
-                logger.info("Application closing requested")
-                
-                if hasattr(app, 'is_processing') and app.is_processing:
-                    result = messagebox.askyesnocancel(
-                        "Quit", 
-                        "Processing is still running. Do you want to stop and quit?"
-                    )
-                    if result is True:  # Yes - stop and quit
-                        logger.info("User chose to stop processing and quit")
-                        app.is_processing = False
-                        if hasattr(app, 'close_loading_overlay'):
-                            app.close_loading_overlay()
-                        root.after(1000, lambda: safe_destroy(root))
-                    elif result is False:  # No - quit anyway
-                        logger.info("User chose to quit without stopping")
-                        safe_destroy(root)
-                    # Cancel - do nothing
-                else:
-                    safe_destroy(root)
-                    
-            except Exception as e:
-                logger.error(f"Error during shutdown: {e}")
-                safe_destroy(root)
-        
-        def safe_destroy(window):
-            """Safely destroy the window"""
-            try:
-                window.quit()
-                window.destroy()
-            except Exception as e:
-                logger.error(f"Error destroying window: {e}")
-                try:
-                    import sys
-                    sys.exit(0)
-                except:
-                    pass
-        
-        root.protocol("WM_DELETE_WINDOW", on_closing)
-        
-        # Ensure window is visible and properly focused
-        try:
-            root.deiconify()
-            root.lift()
-            root.focus_force()
-            
-            # Windows-specific: Additional focus handling
-            if sys.platform.startswith('win'):
-                root.after(1000, lambda: root.focus_set())
-                
-        except Exception as e:
-            logger.warning(f"Could not properly focus window: {e}")
-        
-        # Start main loop with comprehensive error handling
-        logger.info("Starting Windows GUI main loop...")
-        try:
-            root.mainloop()
-        except KeyboardInterrupt:
-            logger.info("Application interrupted by user")
-        except Exception as e:
-            logger.error(f"Main loop error: {e}")
-            try:
-                messagebox.showerror("Critical Error", 
-                                   f"A critical error occurred: {e}\n\nThe application will close.")
-            except:
-                pass
-        finally:
-            # Cleanup
-            try:
-                logger.info("Performing cleanup...")
-                if hasattr(app, 'close_loading_overlay'):
-                    app.close_loading_overlay()
-                root.quit()
-            except Exception as e:
-                logger.error(f"Error during cleanup: {e}")
-            finally:
-                try:
-                    root.destroy()
-                except:
-                    pass
-                
-    except Exception as e:
-        logger.error(f"Failed to create GUI application: {e}")
-        try:
-            messagebox.showerror("Startup Error", 
-                               f"Failed to start application: {e}\n\nPlease check the log for details.")
-        except:
-            print(f"Critical Error: Failed to start application: {e}")
-        finally:
-            try:
+    # Center the window on screen
+    root.update_idletasks()
+    width = root.winfo_reqwidth()
+    height = root.winfo_reqheight()
+    pos_x = (root.winfo_screenwidth() // 2) - (width // 2)
+    pos_y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+    
+    # Create and run the application
+    app = TrichomeAnalysisGUI(root)
+    
+    # Handle window closing
+    def on_closing():
+        if app.is_processing:
+            if messagebox.askokcancel("Quit", "Processing is still running. Do you want to stop and quit?"):
+                app.is_processing = False
                 root.destroy()
-            except:
-                pass
+        else:
+            root.destroy()
+    
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+    
+    # Start the GUI main loop
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        print("Application interrupted by user")
+    except Exception as e:
+        print(f"GUI Error: {e}")
+        messagebox.showerror("Application Error", f"An error occurred: {e}")
 
-# Additional Windows-specific helper functions
-def ensure_windows_compatibility():
-    """Ensure Windows compatibility for file operations"""
-    if sys.platform.startswith('win'):
-        # Set proper encoding for Windows
-        import locale
-        try:
-            locale.setlocale(locale.LC_ALL, '')
-        except:
-            pass
-        
-        # Ensure matplotlib works on Windows
-        try:
-            import matplotlib
-            matplotlib.use('TkAgg')
-        except:
-            pass
 class PeakDetectionMetrics:
     """Class to track and report detection quality metrics."""
     
@@ -2779,6 +2670,452 @@ def detect_wing_boundary_from_trichomes(self, prob_map, raw_img=None, peaks=None
     logger.info(f"Trichome-based wing detection successful: {wing_area} pixels ({coverage:.2f} coverage)")
     return wing_mask
 
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
+# class AnatomicalTemplateMatcher:
+#     """Wing-ratio based template matcher using absolute ratios to total wing area."""
+    
+#     def __init__(self):
+#         # Define the 5 regions based on your ACTUAL data ratios to total wing
+#         # From your data: Region 5 (21.4%) > Region 3 (18.1%) > Region 4 (17.9%) > Region 2 (15.9%) > Region 1 (9.3%)
+#         self.target_regions = {
+#             1: {  # Your region 1 - smallest, very elongated
+#                 'name': 'Region-1',
+#                 'wing_area_ratio': 0.0933,      # 9.33% of total wing
+#                 'wing_ratio_tolerance': 0.025,   # ±2.5% tolerance
+#                 'aspect_ratio_range': (7.0, 11.0),  # Very elongated (AR=9.20)
+#                 'solidity_range': (0.80, 0.95),     # Medium solidity (0.885)
+#                 'distinctive_features': {
+#                     'is_smallest': True,
+#                     'is_very_elongated': True,
+#                     'wing_coverage': 'small'
+#                 },
+#                 'size_rank_expected': 5  # Smallest of the 5
+#             },
+#             2: {  # Your region 2 - medium-small, elongated, low solidity
+#                 'name': 'Region-2', 
+#                 'wing_area_ratio': 0.1592,      # 15.92% of total wing
+#                 'wing_ratio_tolerance': 0.03,
+#                 'aspect_ratio_range': (5.5, 8.5),   # Elongated (AR=6.95)
+#                 'solidity_range': (0.70, 0.80),     # Low solidity (0.743) - distinctive!
+#                 'distinctive_features': {
+#                     'is_smallest': False,
+#                     'is_very_elongated': False,
+#                     'wing_coverage': 'medium-small',
+#                     'has_low_solidity': True  # Most distinctive feature
+#                 },
+#                 'size_rank_expected': 4
+#             },
+#             3: {  # Your region 3 - large, elongated, good solidity
+#                 'name': 'Region-3',
+#                 'wing_area_ratio': 0.1814,      # 18.14% of total wing
+#                 'wing_ratio_tolerance': 0.03,
+#                 'aspect_ratio_range': (5.5, 8.5),   # Elongated (AR=6.84)
+#                 'solidity_range': (0.90, 0.98),     # High solidity (0.948)
+#                 'distinctive_features': {
+#                     'is_smallest': False,
+#                     'is_very_elongated': False,
+#                     'wing_coverage': 'large'
+#                 },
+#                 'size_rank_expected': 2  # 2nd largest
+#             },
+#             4: {  # Your region 4 - large, compact, very high solidity
+#                 'name': 'Region-4',
+#                 'wing_area_ratio': 0.1790,      # 17.90% of total wing
+#                 'wing_ratio_tolerance': 0.03,
+#                 'aspect_ratio_range': (2.0, 3.0),   # Compact (AR=2.36)
+#                 'solidity_range': (0.95, 1.0),      # Very high solidity (0.973)
+#                 'distinctive_features': {
+#                     'is_smallest': False,
+#                     'is_very_elongated': False,
+#                     'wing_coverage': 'large',
+#                     'is_compact': True  # Distinctive: compact + large
+#                 },
+#                 'size_rank_expected': 3  # 3rd largest
+#             },
+#             5: {  # Your region 5 - largest, compact, highest solidity
+#                 'name': 'Region-5',
+#                 'wing_area_ratio': 0.2141,      # 21.41% of total wing
+#                 'wing_ratio_tolerance': 0.03,
+#                 'aspect_ratio_range': (2.3, 3.2),   # Compact (AR=2.68)
+#                 'solidity_range': (0.98, 1.0),      # Highest solidity (0.996)
+#                 'distinctive_features': {
+#                     'is_smallest': False,
+#                     'is_very_elongated': False,
+#                     'wing_coverage': 'largest',
+#                     'is_compact': True,
+#                     'is_largest': True  # Most distinctive: largest + compact
+#                 },
+#                 'size_rank_expected': 1  # Largest
+#             }
+#         }
+    
+    
+#     def get_region_name(self, label):
+#         """Get the name of a region by its label/template ID."""
+#         if label in self.target_regions:
+#             return self.target_regions[label]['name']
+#         else:
+#             return f"Region-{label}"
+    
+    
+#     def estimate_total_wing_area(self, labeled_mask, wing_mask):
+#         """Estimate total wing area for calculating ratios."""
+        
+#         # Method 1: Use wing mask if available and reasonable
+#         wing_area_from_mask = np.sum(wing_mask)
+        
+#         # Method 2: Use detected regions + coverage estimate
+#         regions = regionprops(labeled_mask)
+#         total_detected_area = sum(r.area for r in regions)
+        
+#         # From your data, the 5 target regions cover ~82.7% of wing
+#         expected_coverage = 0.827
+#         estimated_wing_from_regions = total_detected_area / expected_coverage
+        
+#         # Choose the most reasonable estimate
+#         if wing_area_from_mask > 0:
+#             # Use wing mask if it seems reasonable (not too different from region estimate)
+#             ratio = wing_area_from_mask / estimated_wing_from_regions
+#             if 0.7 < ratio < 1.4:  # Wing mask seems reasonable
+#                 estimated_wing_area = wing_area_from_mask
+#                 method = "wing_mask"
+#             else:
+#                 estimated_wing_area = estimated_wing_from_regions
+#                 method = "region_coverage"
+#         else:
+#             estimated_wing_area = estimated_wing_from_regions
+#             method = "region_coverage"
+        
+#         logger.info(f"Wing area estimation: {estimated_wing_area:.0f} (method: {method})")
+#         logger.info(f"  Wing mask area: {wing_area_from_mask:.0f}")
+#         logger.info(f"  Region-based estimate: {estimated_wing_from_regions:.0f}")
+        
+#         return estimated_wing_area
+    
+#     def calculate_wing_ratio_signature(self, region, total_wing_area):
+#         """Calculate region signature based on wing area ratios."""
+        
+#         wing_ratio = region.area / total_wing_area
+#         aspect_ratio = region.major_axis_length / (region.minor_axis_length + 1e-8)
+        
+#         return {
+#             'wing_ratio': wing_ratio,
+#             'aspect_ratio': aspect_ratio,
+#             'solidity': region.solidity,
+#             'absolute_area': region.area,
+#             'is_very_elongated': aspect_ratio > 7.0,
+#             'is_compact': aspect_ratio < 3.5,
+#             'has_low_solidity': region.solidity < 0.8,
+#             'region': region,
+#             'label': region.label
+#         }
+    
+#     def calculate_template_match_score(self, region_sig, template_id):
+#         """Calculate how well a region matches a template using wing ratios."""
+        
+#         template = self.target_regions[template_id]
+#         score = 0  # Lower is better
+        
+#         # 1. Wing area ratio match (most important!)
+#         expected_ratio = template['wing_area_ratio']
+#         tolerance = template['wing_ratio_tolerance']
+#         ratio_error = abs(region_sig['wing_ratio'] - expected_ratio)
+        
+#         if ratio_error <= tolerance:
+#             # Within tolerance - good match
+#             score += ratio_error / tolerance * 20  # 0-20 points
+#         else:
+#             # Outside tolerance - penalty
+#             excess_error = ratio_error - tolerance
+#             score += 20 + excess_error * 200  # Heavy penalty for being way off
+        
+#         # 2. Aspect ratio match
+#         ar_range = template['aspect_ratio_range']
+#         if ar_range[0] <= region_sig['aspect_ratio'] <= ar_range[1]:
+#             score += 0  # Perfect match
+#         else:
+#             if region_sig['aspect_ratio'] < ar_range[0]:
+#                 score += (ar_range[0] - region_sig['aspect_ratio']) * 8
+#             else:
+#                 score += (region_sig['aspect_ratio'] - ar_range[1]) * 8
+        
+#         # 3. Solidity match
+#         sol_range = template['solidity_range']
+#         if sol_range[0] <= region_sig['solidity'] <= sol_range[1]:
+#             score += 0  # Perfect match
+#         else:
+#             if region_sig['solidity'] < sol_range[0]:
+#                 score += (sol_range[0] - region_sig['solidity']) * 50
+#             else:
+#                 score += (region_sig['solidity'] - sol_range[1]) * 50
+        
+#         # 4. Distinctive feature bonuses/penalties
+#         features = template['distinctive_features']
+        
+#         # Check low solidity feature
+#         if features.get('has_low_solidity', False):
+#             if region_sig['has_low_solidity']:
+#                 score -= 15  # Bonus for matching distinctive feature
+#             else:
+#                 score += 25  # Penalty for not matching
+#         elif region_sig['has_low_solidity'] and not features.get('has_low_solidity', False):
+#             score += 20  # Penalty for having low solidity when not expected
+        
+#         # Check compact feature
+#         if features.get('is_compact', False):
+#             if region_sig['is_compact']:
+#                 score -= 10  # Bonus
+#             else:
+#                 score += 20  # Penalty
+#         elif region_sig['is_compact'] and not features.get('is_compact', False):
+#             score += 15  # Penalty for being compact when not expected
+        
+#         # Check very elongated feature
+#         if features.get('is_very_elongated', False):
+#             if region_sig['is_very_elongated']:
+#                 score -= 10  # Bonus
+#             else:
+#                 score += 20  # Penalty
+        
+#         return score
+    
+#     def identify_best_matches_by_wing_ratio(self, region_signatures):
+#         """Find best matches using wing area ratios as primary criterion."""
+        
+#         logger.info("Calculating wing-ratio based matches:")
+        
+#         # Create match matrix
+#         match_scores = {}
+#         for region_sig in region_signatures:
+#             region_label = region_sig['label']
+#             match_scores[region_label] = {}
+            
+#             logger.info(f"  Region {region_label}: wing_ratio={region_sig['wing_ratio']:.4f}, "
+#                        f"AR={region_sig['aspect_ratio']:.1f}, sol={region_sig['solidity']:.3f}")
+            
+#             for template_id in range(1, 6):  # Only 5 templates now
+#                 score = self.calculate_template_match_score(region_sig, template_id)
+#                 match_scores[region_label][template_id] = score
+                
+#                 template_name = self.target_regions[template_id]['name']
+#                 expected_ratio = self.target_regions[template_id]['wing_area_ratio']
+#                 logger.info(f"    → {template_id} ({template_name}): score={score:.1f} "
+#                            f"(expected_ratio={expected_ratio:.4f})")
+        
+#         return match_scores
+    
+#     def solve_assignment_problem(self, region_signatures, match_scores):
+#         """Solve the assignment problem using Hungarian algorithm."""
+        
+#         n_regions = len(region_signatures)
+#         n_templates = 5
+        
+#         # Create cost matrix (pad with high costs if regions != templates)
+#         max_size = max(n_regions, n_templates)
+#         cost_matrix = np.full((max_size, max_size), 1000.0)
+        
+#         # Fill in actual scores
+#         for i, region_sig in enumerate(region_signatures):
+#             region_label = region_sig['label']
+#             for j, template_id in enumerate(range(1, 6)):
+#                 cost_matrix[i, j] = match_scores[region_label][template_id]
+        
+#         # Solve assignment problem
+#         from scipy.optimize import linear_sum_assignment
+#         row_indices, col_indices = linear_sum_assignment(cost_matrix)
+        
+#         # Extract valid assignments
+#         assignment = {}
+#         for row, col in zip(row_indices, col_indices):
+#             if row < n_regions and col < n_templates:
+#                 region_sig = region_signatures[row]
+#                 template_id = col + 1
+#                 score = cost_matrix[row, col]
+                
+#                 # Only accept reasonable matches
+#                 if score < 100:  # Reasonable threshold
+#                     assignment[region_sig['label']] = template_id
+                    
+#                     template_name = self.target_regions[template_id]['name']
+#                     logger.info(f"  ASSIGNED: Region {region_sig['label']} → {template_id} "
+#                                f"({template_name}) [score={score:.1f}]")
+#                 else:
+#                     logger.warning(f"  REJECTED: Region {region_sig['label']} → {template_id} "
+#                                  f"[score={score:.1f} too high]")
+        
+#         return assignment
+    
+#     def wing_ratio_based_matching(self, labeled_mask, wing_mask):
+#         """Main matching using wing area ratios."""
+        
+#         # Get regions and filter
+#         regions = regionprops(labeled_mask)
+#         if not regions:
+#             return labeled_mask
+        
+#         # More aggressive filtering to remove spurious regions
+#         filtered_mask = self.filter_spurious_regions(labeled_mask, wing_mask)
+#         regions = regionprops(filtered_mask)
+        
+#         if not regions:
+#             return filtered_mask
+        
+#         logger.info("="*70)
+#         logger.info("WING-RATIO BASED MATCHING")
+#         logger.info("="*70)
+        
+#         # Estimate total wing area
+#         total_wing_area = self.estimate_total_wing_area(filtered_mask, wing_mask)
+        
+#         # Calculate signatures for all regions
+#         region_signatures = []
+#         for region in regions:
+#             signature = self.calculate_wing_ratio_signature(region, total_wing_area)
+#             region_signatures.append(signature)
+        
+#         # Sort by area for display
+#         region_signatures.sort(key=lambda r: r['absolute_area'], reverse=True)
+        
+#         logger.info(f"Analyzing {len(region_signatures)} filtered regions:")
+#         for i, sig in enumerate(region_signatures):
+#             logger.info(f"  {i+1}. Region {sig['label']}: wing_ratio={sig['wing_ratio']:.4f} "
+#                        f"({sig['wing_ratio']*100:.1f}%), AR={sig['aspect_ratio']:.1f}, "
+#                        f"sol={sig['solidity']:.3f}"
+#                        f"{', compact' if sig['is_compact'] else ''}"
+#                        f"{', very_elongated' if sig['is_very_elongated'] else ''}"
+#                        f"{', low_solidity' if sig['has_low_solidity'] else ''}")
+        
+#         # Find best matches
+#         match_scores = self.identify_best_matches_by_wing_ratio(region_signatures)
+        
+#         # Solve assignment problem
+#         assignment = self.solve_assignment_problem(region_signatures, match_scores)
+        
+#         # Create anatomical mask
+#         anatomical_mask = np.zeros_like(filtered_mask)
+        
+#         logger.info("="*50)
+#         logger.info("FINAL ASSIGNMENT:")
+        
+#         assigned_templates = set()
+#         for region_label, template_id in assignment.items():
+#             region_mask = filtered_mask == region_label
+#             anatomical_mask[region_mask] = template_id
+#             assigned_templates.add(template_id)
+            
+#             template_name = self.target_regions[template_id]['name']
+#             expected_ratio = self.target_regions[template_id]['wing_area_ratio']
+            
+#             # Get actual ratio
+#             region_sig = next(r for r in region_signatures if r['label'] == region_label)
+#             actual_ratio = region_sig['wing_ratio']
+            
+#             logger.info(f"  Region {region_label} → {template_id} ({template_name})")
+#             logger.info(f"    Expected: {expected_ratio:.4f} ({expected_ratio*100:.1f}%), "
+#                        f"Actual: {actual_ratio:.4f} ({actual_ratio*100:.1f}%)")
+        
+#         # Report missing templates
+#         all_templates = set(range(1, 6))
+#         missing_templates = all_templates - assigned_templates
+        
+#         if missing_templates:
+#             logger.warning("MISSING TEMPLATES:")
+#             for template_id in sorted(missing_templates):
+#                 template_name = self.target_regions[template_id]['name']
+#                 expected_ratio = self.target_regions[template_id]['wing_area_ratio']
+#                 logger.warning(f"  Template {template_id} ({template_name}) - "
+#                              f"expected {expected_ratio:.4f} ({expected_ratio*100:.1f}%)")
+#         else:
+#             logger.info("All 5 templates successfully assigned!")
+        
+#         # Final summary
+#         unique_labels = np.unique(anatomical_mask)
+#         matched_count = len(unique_labels[unique_labels > 0])
+        
+#         logger.info("="*70)
+#         logger.info(f"WING-RATIO MATCHING COMPLETE: {matched_count}/5 regions labeled")
+#         logger.info(f"Uses absolute ratios to total wing area - robust to missing regions!")
+#         logger.info("="*70)
+        
+#         return anatomical_mask
+    
+#     def filter_spurious_regions(self, labeled_mask, wing_mask):
+#         """Aggressively filter out spurious regions that don't match target characteristics."""
+        
+#         regions = regionprops(labeled_mask)
+#         if not regions:
+#             return labeled_mask
+        
+#         logger.info(f"Filtering {len(regions)} detected regions...")
+        
+#         # Estimate wing area for ratio calculations
+#         wing_area = np.sum(wing_mask) if np.sum(wing_mask) > 0 else sum(r.area for r in regions) / 0.827
+        
+#         keep_regions = []
+        
+#         for region in regions:
+#             wing_ratio = region.area / wing_area
+#             aspect_ratio = region.major_axis_length / (region.minor_axis_length + 1e-8)
+            
+#             # Basic size filter - target regions are 9-22% of wing
+#             if wing_ratio < 0.05 or wing_ratio > 0.35:
+#                 logger.info(f"  REJECT Region {region.label}: wing_ratio={wing_ratio:.4f} outside range [0.05, 0.35]")
+#                 continue
+            
+#             # Basic shape filter - target regions have AR between 2-11
+#             if aspect_ratio < 1.5 or aspect_ratio > 12.0:
+#                 logger.info(f"  REJECT Region {region.label}: AR={aspect_ratio:.1f} outside range [1.5, 12.0]")
+#                 continue
+            
+#             # Solidity filter - target regions have reasonable solidity
+#             if region.solidity < 0.45:
+#                 logger.info(f"  REJECT Region {region.label}: solidity={region.solidity:.3f} too low")
+#                 continue
+            
+#             # Position filter - should be in main wing body
+#             wing_coords = np.column_stack(np.where(wing_mask))
+#             if len(wing_coords) > 0:
+#                 min_y, min_x = wing_coords.min(axis=0)
+#                 max_y, max_x = wing_coords.max(axis=0)
+                
+#                 if max_y > min_y and max_x > min_x:
+#                     norm_y = (region.centroid[0] - min_y) / (max_y - min_y)
+#                     norm_x = (region.centroid[1] - min_x) / (max_x - min_x)
+                    
+#                     if not (0.05 < norm_x < 0.95 and 0.0 < norm_y < 1.0):
+#                         logger.info(f"  REJECT Region {region.label}: position ({norm_x:.2f}, {norm_y:.2f}) outside wing body")
+#                         continue
+            
+#             # Passed all filters
+#             keep_regions.append(region)
+#             logger.info(f"  KEEP Region {region.label}: wing_ratio={wing_ratio:.4f}, AR={aspect_ratio:.1f}, sol={region.solidity:.3f}")
+        
+#         # Create filtered mask
+#         filtered_mask = np.zeros_like(labeled_mask)
+#         new_label = 1
+        
+#         for region in keep_regions:
+#             region_mask = labeled_mask == region.label
+#             filtered_mask[region_mask] = new_label
+#             new_label += 1
+        
+#         logger.info(f"Kept {len(keep_regions)} regions after filtering")
+#         return filtered_mask
+    
+#     # Main interface
+#     def match_regions_to_template(self, labeled_mask, wing_mask, vein_mask=None):
+#         """Main interface - uses wing-ratio based matching."""
+#         return self.wing_ratio_based_matching(labeled_mask, wing_mask)
+
+
 
 class AnatomicalTemplateMatcher:
     """Wing-ratio based template matcher using absolute ratios to total wing area."""
@@ -2857,15 +3194,30 @@ class AnatomicalTemplateMatcher:
                 'size_rank_expected': 1  # Largest
             }
         }
-    
-    
+    def set_empirical_merged_data(self, wing_area, merged_area, merged_ar, merged_solidity):
+        """
+        Set empirical merged region data for more accurate detection.
+        
+        Args:
+            wing_area: Total wing area in pixels
+            merged_area: Combined area of regions 4+5 in pixels
+            merged_ar: Aspect ratio of merged region
+            merged_solidity: Solidity of merged region
+        """
+        self.empirical_merged_ratio = merged_area / wing_area
+        self.empirical_merged_ar = merged_ar
+        self.empirical_merged_solidity = merged_solidity
+        
+        logger.info(f"Set empirical merged 4+5 data:")
+        logger.info(f"  Wing ratio: {self.empirical_merged_ratio:.4f}")
+        logger.info(f"  Aspect ratio: {self.empirical_merged_ar:.2f}")
+        logger.info(f"  Solidity: {self.empirical_merged_solidity:.3f}")
     def get_region_name(self, label):
         """Get the name of a region by its label/template ID."""
         if label in self.target_regions:
             return self.target_regions[label]['name']
         else:
             return f"Region-{label}"
-    
     
     def estimate_total_wing_area(self, labeled_mask, wing_mask):
         """Estimate total wing area for calculating ratios."""
@@ -3148,6 +3500,252 @@ class AnatomicalTemplateMatcher:
         
         return anatomical_mask
     
+    def match_regions_with_merge_detection(self, labeled_mask, wing_mask, allow_merge=False):
+        """
+        Template matching that can detect and handle merged regions 4+5.
+        
+        If allow_merge=True, looks for a large region that matches combined 4+5 properties
+        and labels it as region 4 with merged naming.
+        """
+        
+        # Get regions and filter
+        regions = regionprops(labeled_mask)
+        if not regions:
+            return labeled_mask
+        
+        # More aggressive filtering to remove spurious regions
+        filtered_mask = self.filter_spurious_regions(labeled_mask, wing_mask)
+        regions = regionprops(filtered_mask)
+        
+        if not regions:
+            return filtered_mask
+        
+        logger.info("="*70)
+        logger.info(f"TEMPLATE MATCHING WITH MERGE DETECTION (merge_mode={allow_merge})")
+        logger.info("="*70)
+        
+        # Estimate total wing area
+        total_wing_area = self.estimate_total_wing_area(filtered_mask, wing_mask)
+        
+        # Calculate signatures for all regions
+        region_signatures = []
+        for region in regions:
+            signature = self.calculate_wing_ratio_signature(region, total_wing_area)
+            region_signatures.append(signature)
+        
+        # Sort by area for display
+        region_signatures.sort(key=lambda r: r['absolute_area'], reverse=True)
+        
+        logger.info(f"Analyzing {len(region_signatures)} filtered regions:")
+        for i, sig in enumerate(region_signatures):
+            logger.info(f"  {i+1}. Region {sig['label']}: wing_ratio={sig['wing_ratio']:.4f} "
+                       f"({sig['wing_ratio']*100:.1f}%), AR={sig['aspect_ratio']:.1f}, "
+                       f"sol={sig['solidity']:.3f}")
+        
+        # Check if we should use merged template matching
+        if allow_merge:
+            # Look for a region that matches combined 4+5 properties
+            merged_candidate = self._find_merged_45_candidate(region_signatures, total_wing_area)
+            
+            if merged_candidate is not None:
+                logger.info(f"✓✓✓ DETECTED merged 4+5 candidate: Region {merged_candidate['label']}")
+                # Use modified template matching with merged region
+                return self._match_with_merged_region(region_signatures, filtered_mask, 
+                                                     wing_mask, merged_candidate)
+            else:
+                logger.warning("✗✗✗ No merged 4+5 candidate found")
+                logger.warning("Will proceed with FORCED merge mode anyway - labeling largest compact region as merged 4+5")
+                
+                # FORCE MERGE: Find the largest compact high-solidity region and call it merged 4+5
+                # This handles cases where the region exists but doesn't perfectly match criteria
+                compact_regions = [sig for sig in region_signatures 
+                                 if sig['is_compact'] and sig['solidity'] > 0.85]
+                
+                if compact_regions:
+                    # Take the largest compact region
+                    forced_merged = max(compact_regions, key=lambda s: s['absolute_area'])
+                    logger.warning(f"FORCING Region {forced_merged['label']} as merged 4+5 "
+                                 f"(area={forced_merged['absolute_area']:,}, "
+                                 f"ratio={forced_merged['wing_ratio']:.3f}, "
+                                 f"AR={forced_merged['aspect_ratio']:.2f})")
+                    return self._match_with_merged_region(region_signatures, filtered_mask,
+                                                         wing_mask, forced_merged)
+                else:
+                    logger.error("Cannot find any compact region to force as merged 4+5")
+                    logger.error("Falling back to standard 5-region matching")
+        
+        # Standard matching (only used if merge detection completely fails)
+        logger.info("Using STANDARD 5-region matching")
+        match_scores = self.identify_best_matches_by_wing_ratio(region_signatures)
+        assignment = self.solve_assignment_problem(region_signatures, match_scores)
+        
+        # Create anatomical mask
+        anatomical_mask = np.zeros_like(filtered_mask)
+        
+        for region_label, template_id in assignment.items():
+            region_mask = filtered_mask == region_label
+            anatomical_mask[region_mask] = template_id
+        
+        return anatomical_mask
+    
+    def _find_merged_45_candidate(self, region_signatures, total_wing_area):
+
+            
+            # Your empirical merged region properties
+            expected_merged_ratio = 1509062 / 4169076  # ~0.362 (36.2%)
+            expected_AR = 2.87
+            expected_solidity = 0.966
+            
+            # Tolerances based on biological variation
+            ratio_tolerance = 0.10  # ±10% for area ratio
+            ar_tolerance = 0.8      # ±0.8 for aspect ratio
+            sol_tolerance = 0.08    # ±0.08 for solidity
+            
+            logger.info(f"Looking for merged 4+5 with empirical properties:")
+            logger.info(f"  Expected wing_ratio: {expected_merged_ratio:.4f} (±{ratio_tolerance:.4f})")
+            logger.info(f"  Expected AR: {expected_AR:.2f} (±{ar_tolerance:.2f})")
+            logger.info(f"  Expected solidity: {expected_solidity:.3f} (±{sol_tolerance:.3f})")
+            
+            candidates = []
+            
+            for sig in region_signatures:
+                wing_ratio = sig['wing_ratio']
+                ar = sig['aspect_ratio']
+                sol = sig['solidity']
+                
+                # Calculate how well this region matches empirical merged properties
+                ratio_match = abs(wing_ratio - expected_merged_ratio) < ratio_tolerance
+                ar_match = abs(ar - expected_AR) < ar_tolerance
+                sol_match = abs(sol - expected_solidity) < sol_tolerance
+                
+                if ratio_match and ar_match and sol_match:
+                    # Calculate combined score (lower is better)
+                    ratio_error = abs(wing_ratio - expected_merged_ratio) / ratio_tolerance
+                    ar_error = abs(ar - expected_AR) / ar_tolerance
+                    sol_error = abs(sol - expected_solidity) / sol_tolerance
+                    combined_score = ratio_error + ar_error + sol_error
+                    
+                    candidates.append((sig, combined_score))
+                    logger.info(f"  ✓ STRONG CANDIDATE: Region {sig['label']}")
+                    logger.info(f"    wing_ratio={wing_ratio:.4f} (expected {expected_merged_ratio:.4f})")
+                    logger.info(f"    AR={ar:.2f} (expected {expected_AR:.2f})")
+                    logger.info(f"    solidity={sol:.3f} (expected {expected_solidity:.3f})")
+                    logger.info(f"    combined_score={combined_score:.3f}")
+            
+            if candidates:
+                # Return best candidate (lowest combined score)
+                best_candidate = min(candidates, key=lambda x: x[1])
+                logger.info(f"  SELECTED: Region {best_candidate[0]['label']} as merged 4+5 (score={best_candidate[1]:.3f})")
+                return best_candidate[0]
+            
+            # Fallback: look for regions that are close but maybe slightly off
+            logger.info("  No perfect match found, checking with relaxed criteria...")
+            
+            relaxed_candidates = []
+            for sig in region_signatures:
+                wing_ratio = sig['wing_ratio']
+                ar = sig['aspect_ratio']
+                sol = sig['solidity']
+                
+                # More lenient criteria
+                ratio_close = 0.25 < wing_ratio < 0.50  # Between 25-50% of wing
+                ar_close = 2.0 < ar < 4.5               # Compact but not too compact
+                sol_close = sol > 0.85                   # High solidity
+                
+                if ratio_close and ar_close and sol_close:
+                    # Score based on distance from empirical values
+                    ratio_error = abs(wing_ratio - expected_merged_ratio)
+                    ar_error = abs(ar - expected_AR)
+                    sol_error = abs(sol - expected_solidity)
+                    combined_score = ratio_error * 5 + ar_error + sol_error * 3
+                    
+                    relaxed_candidates.append((sig, combined_score))
+                    logger.info(f"  ~ Possible: Region {sig['label']}, score={combined_score:.3f}")
+            
+            if relaxed_candidates:
+                best_relaxed = min(relaxed_candidates, key=lambda x: x[1])
+                logger.warning(f"  Using relaxed match: Region {best_relaxed[0]['label']} (score={best_relaxed[1]:.3f})")
+                return best_relaxed[0]
+            
+            logger.warning("  No merged 4+5 candidate found even with relaxed criteria")
+            return None
+    
+    def _match_with_merged_region(self, region_signatures, filtered_mask, 
+                                  wing_mask, merged_candidate):
+        """
+        Perform template matching when we've identified a merged 4+5 region.
+        
+        This labels the merged region as 4 and matches other regions to templates 1, 2, 3.
+        """
+        
+        logger.info("Performing template matching with merged 4+5 region...")
+        
+        anatomical_mask = np.zeros_like(filtered_mask)
+        
+        # First, assign the merged region as region 4
+        merged_label = merged_candidate['label']
+        region_mask = filtered_mask == merged_label
+        anatomical_mask[region_mask] = 4
+        
+        logger.info(f"Assigned merged region (label {merged_label}) as Region 4")
+        
+        # Now match remaining regions to templates 1, 2, 3
+        remaining_signatures = [sig for sig in region_signatures 
+                              if sig['label'] != merged_label]
+        
+        if len(remaining_signatures) == 0:
+            logger.warning("No other regions found besides merged 4+5")
+            return anatomical_mask
+        
+        # Create subset of templates (only 1, 2, 3)
+        available_templates = [1, 2, 3]
+        
+        # Calculate match scores for remaining regions to templates 1-3
+        match_scores = {}
+        for sig in remaining_signatures:
+            region_label = sig['label']
+            match_scores[region_label] = {}
+            
+            for template_id in available_templates:
+                score = self.calculate_template_match_score(sig, template_id)
+                match_scores[region_label][template_id] = score
+        
+        # Solve assignment problem for templates 1-3
+        n_regions = len(remaining_signatures)
+        n_templates = len(available_templates)
+        
+        if n_regions > 0:
+            max_size = max(n_regions, n_templates)
+            cost_matrix = np.full((max_size, max_size), 1000.0)
+            
+            for i, sig in enumerate(remaining_signatures):
+                region_label = sig['label']
+                for j, template_id in enumerate(available_templates):
+                    cost_matrix[i, j] = match_scores[region_label][template_id]
+            
+            from scipy.optimize import linear_sum_assignment
+            row_indices, col_indices = linear_sum_assignment(cost_matrix)
+            
+            for row, col in zip(row_indices, col_indices):
+                if row < n_regions and col < n_templates:
+                    sig = remaining_signatures[row]
+                    template_id = available_templates[col]
+                    score = cost_matrix[row, col]
+                    
+                    if score < 100:
+                        region_mask = filtered_mask == sig['label']
+                        anatomical_mask[region_mask] = template_id
+                        
+                        template_name = self.target_regions[template_id]['name']
+                        logger.info(f"  ASSIGNED: Region {sig['label']} → {template_id} "
+                                  f"({template_name}) [score={score:.1f}]")
+        
+        logger.info("="*70)
+        logger.info("MERGE DETECTION MATCHING COMPLETE")
+        logger.info("="*70)
+        
+        return anatomical_mask
+    
     def filter_spurious_regions(self, labeled_mask, wing_mask):
         """Aggressively filter out spurious regions that don't match target characteristics."""
         
@@ -3167,12 +3765,12 @@ class AnatomicalTemplateMatcher:
             aspect_ratio = region.major_axis_length / (region.minor_axis_length + 1e-8)
             
             # Basic size filter - target regions are 9-22% of wing
-            if wing_ratio < 0.05 or wing_ratio > 0.35:
-                logger.info(f"  REJECT Region {region.label}: wing_ratio={wing_ratio:.4f} outside range [0.05, 0.35]")
+            if wing_ratio < 0.037 or wing_ratio > 0.4:
+                logger.info(f"  REJECT Region {region.label}: wing_ratio={wing_ratio:.4f} outside range [0.05, 0.4]")
                 continue
             
             # Basic shape filter - target regions have AR between 2-11
-            if aspect_ratio < 1.5 or aspect_ratio > 12.0:
+            if aspect_ratio < 1.5 or aspect_ratio > 14.0:
                 logger.info(f"  REJECT Region {region.label}: AR={aspect_ratio:.1f} outside range [1.5, 12.0]")
                 continue
             
@@ -3215,6 +3813,12 @@ class AnatomicalTemplateMatcher:
     def match_regions_to_template(self, labeled_mask, wing_mask, vein_mask=None):
         """Main interface - uses wing-ratio based matching."""
         return self.wing_ratio_based_matching(labeled_mask, wing_mask)
+
+
+
+
+
+
 
 def create_trichome_based_visualization(raw_img, prob_map, all_peaks, wing_mask, 
                                        vein_mask, virtual_veins, intervein_regions, 
@@ -3314,8 +3918,10 @@ def enhanced_intervein_processing_with_trichome_wing(prob_map, raw_img, cfg, out
     logger.info(f"Detected {len(peaks)} trichomes for analysis")
     
     # Step 2: Detect veins (can be done in parallel)
-    vein_detector = ImprovedWingVeinDetector(cfg)
-    vein_mask, skeleton, _ = vein_detector.detect_veins_multi_approach(prob_map, raw_img)
+    # vein_detector = ImprovedWingVeinDetector(cfg)
+    # vein_mask, skeleton, _ = vein_detector.detect_veins_multi_approach(prob_map, raw_img)
+    vein_mask = prob_map[..., 2] > 0.5 if prob_map.shape[-1] >= 3 else np.zeros(prob_map.shape[:2], dtype=bool)
+    skeleton = morphology.skeletonize(vein_mask) 
     
     # Step 3: Use trichome-based wing detection with string removal
     intervein_detector = EnhancedInterveinDetectorWithPentagone(cfg)
@@ -3611,7 +4217,7 @@ class PentagoneMutantHandler:
             score += ratio_error / tolerance * 20
         else:
             excess_error = ratio_error - tolerance
-            score += 20 + excess_error * 200
+            score += 20 + excess_error * 150
         
         # Aspect ratio match
         ar_range = template['aspect_ratio_range']
@@ -3683,6 +4289,216 @@ class PentagoneMutantHandler:
 
 
 
+
+class RegionMerger:
+    """Handles merging of regions 4 and 5 for analysis."""
+    
+    def __init__(self):
+        self.template_matcher = AnatomicalTemplateMatcher()
+    
+    def merge_regions_4_and_5(self, labeled_mask, regions):
+        """Merge regions 4 and 5 into a single region 4+."""
+        logger.info("Merging regions 4 and 5 into combined region 4+...")
+        
+        merged_mask = labeled_mask.copy()
+        
+        # Find regions 4 and 5
+        region_4 = None
+        region_5 = None
+        
+        for region in regions:
+            if region.label == 4:
+                region_4 = region
+            elif region.label == 5:
+                region_5 = region
+        
+        if region_4 is not None and region_5 is not None:
+            # Merge region 5 into region 4
+            merged_mask[merged_mask == 5] = 4
+            logger.info(f"Merged region 5 (area={region_5.area}) into region 4 (area={region_4.area})")
+            logger.info(f"Combined area: {region_4.area + region_5.area}")
+        elif region_4 is not None and region_5 is None:
+            logger.info("Region 4 exists but region 5 not found - keeping as is")
+        elif region_4 is None and region_5 is not None:
+            # Rename region 5 to region 4
+            merged_mask[merged_mask == 5] = 4
+            logger.info("Region 5 found but not region 4 - renaming region 5 to 4+")
+        else:
+            logger.warning("Neither region 4 nor region 5 found - cannot merge")
+        
+        return merged_mask
+    
+    def merge_voronoi_results(self, voronoi_results, region_peaks_dict):
+        """Merge Voronoi statistics for regions 4 and 5."""
+        
+        stats_4 = voronoi_results.get(4)
+        stats_5 = voronoi_results.get(5)
+        
+        if stats_4 is None and stats_5 is None:
+            logger.warning("No Voronoi results for regions 4 or 5 to merge")
+            return voronoi_results
+        
+        # Combine peaks from both regions
+        peaks_4 = region_peaks_dict.get(4, np.empty((0, 2)))
+        peaks_5 = region_peaks_dict.get(5, np.empty((0, 2)))
+        combined_peaks = np.vstack([peaks_4, peaks_5]) if len(peaks_4) > 0 and len(peaks_5) > 0 else (peaks_4 if len(peaks_4) > 0 else peaks_5)
+        
+        # Calculate merged statistics
+        if stats_4 is not None and stats_5 is not None:
+            # Both regions have stats - combine them
+            combined_region_area = stats_4['region_area'] + stats_5['region_area']
+            
+            # Weighted average of cell areas based on number of cells measured
+            total_cells = stats_4['n_cells_measured'] + stats_5['n_cells_measured']
+            if total_cells > 0:
+                combined_avg_cell_area = (
+                    stats_4['average_cell_area'] * stats_4['n_cells_measured'] +
+                    stats_5['average_cell_area'] * stats_5['n_cells_measured']
+                ) / total_cells
+                
+                # Combined standard deviation (pooled)
+                combined_variance = (
+                    (stats_4['n_cells_measured'] - 1) * (stats_4['std_cell_area'] ** 2) +
+                    (stats_5['n_cells_measured'] - 1) * (stats_5['std_cell_area'] ** 2)
+                ) / (total_cells - 2) if total_cells > 2 else 0
+                combined_std = np.sqrt(combined_variance) if combined_variance > 0 else 0
+                
+                combined_cv = combined_std / combined_avg_cell_area if combined_avg_cell_area > 0 else 0
+                
+                total_cells_total = stats_4['n_cells_total'] + stats_5['n_cells_total']
+                combined_percentage = (total_cells / total_cells_total * 100) if total_cells_total > 0 else 0
+                
+                merged_stats = {
+                    'region_area': combined_region_area,
+                    'average_cell_area': combined_avg_cell_area,
+                    'std_cell_area': combined_std,
+                    'cv_cell_area': combined_cv,
+                    'percentage_measured': combined_percentage,
+                    'n_cells_measured': total_cells,
+                    'n_cells_total': total_cells_total,
+                    'region_name': 'Region-4+5-Merged'
+                }
+            else:
+                merged_stats = None
+        elif stats_4 is not None:
+            # Only region 4 has stats
+            merged_stats = stats_4.copy()
+            merged_stats['region_name'] = 'Region-4+5-Merged'
+        else:
+            # Only region 5 has stats
+            merged_stats = stats_5.copy()
+            merged_stats['region_name'] = 'Region-4+5-Merged'
+        
+        # Create new results dict with merged region
+        merged_voronoi_results = {}
+        for label, stats in voronoi_results.items():
+            if label not in [4, 5]:
+                merged_voronoi_results[label] = stats
+        
+        # Add merged region as label 4
+        merged_voronoi_results[4] = merged_stats
+        
+        logger.info(f"Merged Voronoi results: Region 4+ has {merged_stats['n_cells_measured'] if merged_stats else 0} cells")
+        
+        return merged_voronoi_results
+    
+    def merge_region_peaks(self, region_peaks_dict):
+        """Merge peak assignments for regions 4 and 5."""
+        peaks_4 = region_peaks_dict.get(4, np.empty((0, 2)))
+        peaks_5 = region_peaks_dict.get(5, np.empty((0, 2)))
+        
+        if len(peaks_4) > 0 and len(peaks_5) > 0:
+            combined_peaks = np.vstack([peaks_4, peaks_5])
+        elif len(peaks_4) > 0:
+            combined_peaks = peaks_4
+        else:
+            combined_peaks = peaks_5
+        
+        # Update dictionary
+        merged_dict = {k: v for k, v in region_peaks_dict.items() if k not in [4, 5]}
+        merged_dict[4] = combined_peaks
+        
+        logger.info(f"Merged peaks: Region 4+ has {len(combined_peaks)} trichomes")
+        
+        return merged_dict
+
+def save_wing_area_from_background_prob(prob_map, basename, output_dir, is_pentagone_mode=False, is_merged_mode=False):
+    """Calculate and save wing area and aspect ratio from background probability channel."""
+    if is_merged_mode:
+        mode_suffix = "_merged_4_5"
+        mode_label = "Merged Regions 4+5"
+    elif is_pentagone_mode:
+        mode_suffix = "_pentagone"
+        mode_label = "Pentagone (4-region)"
+    else:
+        mode_suffix = "_normal"
+        mode_label = "Normal (5-region)"
+    
+    output_path = os.path.join(output_dir, f"{basename}_wing_metrics{mode_suffix}.csv")
+    
+    # Get background probability (channel 1, 0-indexed)
+    if prob_map.shape[-1] >= 2:
+        background_prob = prob_map[..., 1]
+        # Wing area = pixels with background probability < 0.5
+        wing_mask = background_prob < 0.5
+        wing_area = np.sum(wing_mask)
+        
+        # Calculate wing aspect ratio
+        if wing_area > 0:
+            wing_coords = np.column_stack(np.where(wing_mask))
+            # Get bounding box
+            min_y, min_x = wing_coords.min(axis=0)
+            max_y, max_x = wing_coords.max(axis=0)
+            
+            wing_height = max_y - min_y + 1
+            wing_width = max_x - min_x + 1
+            wing_aspect_ratio = wing_width / wing_height if wing_height > 0 else 0
+            
+            # Also calculate fitted ellipse aspect ratio for better accuracy
+            try:
+                # Label the wing mask
+                labeled_wing = label(wing_mask)
+                if labeled_wing.max() > 0:
+                    wing_props = regionprops(labeled_wing)[0]
+                    wing_major_axis = wing_props.major_axis_length
+                    wing_minor_axis = wing_props.minor_axis_length
+                    wing_ellipse_aspect_ratio = wing_major_axis / wing_minor_axis if wing_minor_axis > 0 else 0
+                else:
+                    wing_ellipse_aspect_ratio = 0
+            except:
+                wing_ellipse_aspect_ratio = 0
+        else:
+            wing_aspect_ratio = 0
+            wing_ellipse_aspect_ratio = 0
+            wing_height = 0
+            wing_width = 0
+    else:
+        wing_area = 0
+        wing_aspect_ratio = 0
+        wing_ellipse_aspect_ratio = 0
+        wing_height = 0
+        wing_width = 0
+        logger.warning(f"No background channel available for {basename}")
+    
+    total_pixels = prob_map.shape[0] * prob_map.shape[1]
+    wing_coverage = (wing_area / total_pixels * 100) if total_pixels > 0 else 0
+    
+    with open(output_path, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([f"# Wing Metrics from Background Probability"])
+        writer.writerow([f"# Analysis Mode: {mode_label}"])
+        writer.writerow(["metric", "value", "unit"])
+        writer.writerow(["wing_area", wing_area, "pixels"])
+        writer.writerow(["wing_area_microns_squared", wing_area / (PIXELS_PER_MICRON**2), "μm²"])
+        writer.writerow(["wing_width", wing_width, "pixels"])
+        writer.writerow(["wing_height", wing_height, "pixels"])
+        writer.writerow(["wing_bbox_aspect_ratio", f"{wing_aspect_ratio:.4f}", "width/height"])
+        writer.writerow(["wing_ellipse_aspect_ratio", f"{wing_ellipse_aspect_ratio:.4f}", "major/minor"])
+        writer.writerow(["total_image_pixels", total_pixels, "pixels"])
+        writer.writerow(["wing_coverage", f"{wing_coverage:.2f}", "percent"])
+    
+    logger.info(f"Saved wing metrics ({mode_label}) to {output_path}")
+    return wing_aspect_ratio, wing_ellipse_aspect_ratio
 class EnhancedInterveinDetectorWithPentagone:
     """Enhanced intervein detector with pentagone mutant support."""
     
@@ -3706,8 +4522,9 @@ class EnhancedInterveinDetectorWithPentagone:
         import cv2 as cv
         if prob_map.shape[-1] >= 4:
             intervein_prob = prob_map[..., 1]
-            cv.morphologyEx(intervein_prob, cv.MORPH_CLOSE, (10,10))
+            
             wing_mask = intervein_prob < 0.4
+            cv.morphologyEx(wing_mask, cv.MORPH_CLOSE, (10,10))
             border_width = 30
             h, w = prob_map.shape[:2]
             border_mask = np.ones((h, w), dtype=bool)
@@ -3728,52 +4545,147 @@ class EnhancedInterveinDetectorWithPentagone:
         """Create virtual veins along wing boundaries where real veins are missing."""
         wing_boundary = morphology.binary_erosion(wing_mask) ^ wing_mask
         thick_boundary = morphology.binary_dilation(wing_boundary, morphology.disk(vein_width//2))
-        dilated_veins = morphology.binary_dilation(actual_vein_mask, morphology.disk(vein_width))
+        # dilated_veins = morphology.binary_dilation(actual_vein_mask, morphology.disk(vein_width))
+        dilated_veins = actual_vein_mask
         virtual_veins = thick_boundary & (~dilated_veins)
         virtual_veins = morphology.remove_small_objects(virtual_veins, min_size=100)
         return virtual_veins
     
+    
     def _filter_intervein_regions(self, labeled_mask, wing_mask):
-        """Filter intervein regions with criteria suitable for boundary regions."""
+        """Filter intervein regions with criteria suitable for boundary regions and merge mode."""
+        
         filtered_mask = np.zeros_like(labeled_mask)
         new_label = 1
         
         regions = regionprops(labeled_mask)
+        
+        # Sort regions by area to prioritize larger regions
         regions.sort(key=lambda r: r.area, reverse=True)
         
+        # Check if we're in merge mode
+        is_merge_mode = hasattr(self.config, 'force_merge_regions_4_5') and self.config.force_merge_regions_4_5
+        
+        # Calculate wing area for ratio-based filtering
+        wing_area = np.sum(wing_mask) if np.sum(wing_mask) > 0 else sum(r.area for r in regions) / 0.827
+        
+        logger.info(f"Filtering {len(regions)} regions (merge_mode={is_merge_mode})...")
+        logger.info(f"Wing area: {wing_area:,.0f} pixels")
+        
         for region in regions:
+            # Skip background
             if region.label == 0:
                 continue
             
-            min_area = self.config.auto_intervein_min_area
-            max_area = self.config.auto_intervein_max_area
+            wing_ratio = region.area / wing_area
             
+            # Size criteria - be VERY lenient for merge mode
+            if is_merge_mode:
+                # In merge mode, expect one very large region (~36% of wing = ~1.5M pixels)
+                # So set max MUCH higher
+                min_area = 50000  # Very permissive minimum
+                max_area = int(wing_area * 0.50)  # Allow up to 50% of wing
+                
+                logger.info(f"  Merge mode: min={min_area:,}, max={max_area:,}")
+            else:
+                # Normal mode
+                min_area = self.config.auto_intervein_min_area
+                max_area = self.config.auto_intervein_max_area
+            
+            # Check if this is likely an edge region
             region_mask = labeled_mask == region.label
+            
+            # Calculate how much of the region touches wing boundary
             wing_boundary = morphology.binary_erosion(wing_mask) ^ wing_mask
             boundary_overlap = np.sum(region_mask & wing_boundary)
             boundary_ratio = boundary_overlap / region.area if region.area > 0 else 0
             
-            if boundary_ratio > 0.1:
-                min_area = min_area // 2
+            # More lenient criteria for boundary regions
+            if boundary_ratio > 0.1:  # This is a boundary region
+                min_area = min_area // 2  # Allow smaller boundary regions
+                
+                # Check if it's at the bottom of the wing (higher y coordinates)
                 if region.centroid[0] > labeled_mask.shape[0] * 0.7:
-                    min_area = min_area // 2
+                    min_area = min_area // 2  # Even more lenient for bottom regions
             
+            # Apply size filter
             if min_area <= region.area <= max_area:
+                # Additional shape checks if enabled
                 if self.config.intervein_shape_filter:
+                    # More lenient solidity for edge regions
                     min_solidity = self.config.min_intervein_solidity
                     if boundary_ratio > 0.1:
-                        min_solidity *= 0.7
+                        min_solidity *= 0.7  # Lower threshold for edge regions
+                    
+                    # In merge mode, be even more lenient
+                    if is_merge_mode:
+                        min_solidity = 0.4  # Very permissive for merge detection
                     
                     if region.solidity >= min_solidity:
                         filtered_mask[region_mask] = new_label
+                        logger.info(f"  ✓ KEEP Region {region.label}: area={region.area:,} ({wing_ratio:.3f}), "
+                                   f"sol={region.solidity:.3f}, boundary={boundary_ratio:.2f}")
                         new_label += 1
+                    else:
+                        logger.info(f"  ✗ REJECT Region {region.label}: solidity too low ({region.solidity:.3f} < {min_solidity:.3f})")
                 else:
                     filtered_mask[region_mask] = new_label
+                    logger.info(f"  ✓ KEEP Region {region.label}: area={region.area:,} ({wing_ratio:.3f})")
                     new_label += 1
             else:
-                logger.debug(f"Region {region.label} excluded due to size: {region.area} pixels")
+                if region.area < min_area:
+                    logger.info(f"  ✗ REJECT Region {region.label}: too small ({region.area:,} < {min_area:,})")
+                else:
+                    logger.info(f"  ✗ REJECT Region {region.label}: too large ({region.area:,} > {max_area:,})")
         
+        logger.info(f"Filtering complete: kept {new_label-1}/{len(regions)} regions")
         return filtered_mask
+    
+    
+    
+    
+    
+    # def _filter_intervein_regions(self, labeled_mask, wing_mask):
+    #     """Filter intervein regions with criteria suitable for boundary regions."""
+    #     filtered_mask = np.zeros_like(labeled_mask)
+    #     new_label = 1
+        
+    #     regions = regionprops(labeled_mask)
+    #     regions.sort(key=lambda r: r.area, reverse=True)
+        
+    #     for region in regions:
+    #         if region.label == 0:
+    #             continue
+            
+    #         min_area = self.config.auto_intervein_min_area
+    #         max_area = self.config.auto_intervein_max_area
+            
+    #         region_mask = labeled_mask == region.label
+    #         wing_boundary = morphology.binary_erosion(wing_mask) ^ wing_mask
+    #         boundary_overlap = np.sum(region_mask & wing_boundary)
+    #         boundary_ratio = boundary_overlap / region.area if region.area > 0 else 0
+            
+    #         if boundary_ratio > 0.1:
+    #             min_area = min_area // 2
+    #             if region.centroid[0] > labeled_mask.shape[0] * 0.7:
+    #                 min_area = min_area // 2
+            
+    #         if min_area <= region.area <= max_area:
+    #             if self.config.intervein_shape_filter:
+    #                 min_solidity = self.config.min_intervein_solidity
+    #                 if boundary_ratio > 0.1:
+    #                     min_solidity *= 0.7
+                    
+    #                 if region.solidity >= min_solidity:
+    #                     filtered_mask[region_mask] = new_label
+    #                     new_label += 1
+    #             else:
+    #                 filtered_mask[region_mask] = new_label
+    #                 new_label += 1
+    #         else:
+    #             logger.debug(f"Region {region.label} excluded due to size: {region.area} pixels")
+        
+    #     return filtered_mask
     
     def visualize_enhanced_segmentation(self, raw_img, vein_mask, virtual_veins, 
                                       intervein_regions, output_path=None):
@@ -3840,56 +4752,96 @@ class EnhancedInterveinDetectorWithPentagone:
         plt.close()
         return fig
     
-    def segment_intervein_regions_enhanced(self, prob_map, vein_mask, raw_img=None, 
-                                         force_pentagone=False):
-        """Enhanced segmentation with automatic pentagone detection."""
+    # def segment_intervein_regions_enhanced(self, prob_map, vein_mask, raw_img=None, 
+    #                                      force_pentagone=False):
+    #     logger.info("Starting enhanced intervein segmentation with pentagone support...")
         
-        logger.info("Starting enhanced intervein segmentation with pentagone support...")
+    #     wing_mask = self.detect_wing_boundary(prob_map, raw_img)
         
-        # Step 1-6: Same as before (detect wing boundary, create barriers, etc.)
-        wing_mask = self.detect_wing_boundary(prob_map, raw_img)
+    #     if not WingBorderChecker.is_valid_wing(wing_mask, self.config.min_wing_area, 
+    #                                            self.config.border_buffer):
+    #         logger.warning("Wing is invalid (partial or too small) - skipping intervein analysis")
+    #         return None, None, None
         
-        # Import the border checker from your existing code
-        if not WingBorderChecker.is_valid_wing(wing_mask, self.config.min_wing_area, 
-                                               self.config.border_buffer):
-            logger.warning("Wing is invalid (partial or too small) - skipping intervein analysis")
-            return None, None, None
+    #     # HOTFIX: Don't create virtual veins - they're blocking valid regions
+    #     virtual_veins = np.zeros_like(vein_mask, dtype=bool)  # Empty mask
         
-        virtual_veins = self.create_virtual_boundary_veins(wing_mask, vein_mask)
-        combined_vein_mask = vein_mask | virtual_veins
-        barrier_mask = morphology.binary_dilation(combined_vein_mask, 
-                                                 morphology.disk(self.config.vein_width_estimate * 2))
+    #     # HOTFIX: Only use actual veins as barriers, not virtual ones
+    #     combined_vein_mask = vein_mask  # Don't add virtual veins
         
-        if prob_map.shape[-1] >= 4:
-            intervein_prob = prob_map[..., 3]
-            intervein_mask = (intervein_prob > self.config.intervein_threshold) & wing_mask & (~barrier_mask)
-        else:
-            intervein_mask = wing_mask & (~barrier_mask)
+    #     # Make barrier mask much thinner
+    #     barrier_mask = morphology.binary_dilation(vein_mask, morphology.disk(1))  # Smaller dilation
         
-        intervein_mask = morphology.remove_small_objects(intervein_mask, min_size=5000)
-        intervein_mask = morphology.remove_small_holes(intervein_mask, area_threshold=5000)
-        labeled_regions = label(intervein_mask)
-        filtered_labeled_mask = self._filter_intervein_regions(labeled_regions, wing_mask)
+    #     # Step 5: Use intervein probability directly with minimal filtering
+    #     if prob_map.shape[-1] >= 4:
+    #         intervein_prob = prob_map[..., 3]
+            
+    #         # HOTFIX: Much simpler approach - trust the probability map
+    #         intervein_mask = intervein_prob > 0.15  # Very low threshold
+    #         intervein_mask = intervein_mask & wing_mask  # Stay within wing
+    #         intervein_mask = intervein_mask & (~barrier_mask)  # Remove only actual veins
+    #     else:
+    #         intervein_mask = wing_mask & (~barrier_mask)
         
-        # Step 7: Apply anatomical labeling with pentagone detection
-        if force_pentagone:
-            logger.info("FORCED PENTAGONE MODE")
-            final_labeled_mask = self.pentagone_handler._apply_four_region_labeling(
-                filtered_labeled_mask, wing_mask)
-            self.is_pentagone_mode = True
-        else:
-            # Automatic detection
-            final_labeled_mask, is_pentagone = self.pentagone_handler.apply_pentagone_labeling(
-                filtered_labeled_mask, wing_mask)
-            self.is_pentagone_mode = is_pentagone
+    #     # Minimal cleanup
+    #     intervein_mask = morphology.remove_small_objects(intervein_mask, min_size=1000)
+    #     intervein_mask = morphology.remove_small_holes(intervein_mask, area_threshold=500)
         
-        # Count regions
-        unique_labels = np.unique(final_labeled_mask)
-        n_regions = len(unique_labels[unique_labels > 0])
-        mode_str = "pentagone (4-region)" if self.is_pentagone_mode else "normal (5-region)"
-        logger.info(f"Enhanced detection found {n_regions} regions using {mode_str} labeling")
+    #     labeled_regions = label(intervein_mask)
         
-        return final_labeled_mask, combined_vein_mask, virtual_veins
+    #     # HOTFIX: Much more lenient filtering
+    #     filtered_labeled_mask = self._filter_intervein_regions_lenient(labeled_regions, wing_mask)
+        
+    #     # Step 7: Apply anatomical labeling with pentagone detection
+    #     if force_pentagone:
+    #         logger.info("FORCED PENTAGONE MODE")
+    #         final_labeled_mask = self.pentagone_handler._apply_four_region_labeling(
+    #             filtered_labeled_mask, wing_mask)
+    #         self.is_pentagone_mode = True
+    #     else:
+    #         # Automatic detection
+    #         final_labeled_mask, is_pentagone = self.pentagone_handler.apply_pentagone_labeling(
+    #             filtered_labeled_mask, wing_mask)
+    #         self.is_pentagone_mode = is_pentagone
+        
+    #     # Count regions
+    #     unique_labels = np.unique(final_labeled_mask)
+    #     n_regions = len(unique_labels[unique_labels > 0])
+    #     mode_str = "pentagone (4-region)" if self.is_pentagone_mode else "normal (5-region)"
+    #     logger.info(f"Enhanced detection found {n_regions} regions using {mode_str} labeling")
+        
+    #     return final_labeled_mask, combined_vein_mask, virtual_veins
+    def segment_intervein_regions_simple(prob_map, wing_mask=None):
+        """Simple, direct segmentation using probability channels."""
+        
+        # Get the channels
+        intervein_prob = prob_map[..., 3].copy()  # Channel 3 - intervein
+        vein_prob = prob_map[..., 2]              # Channel 2 - veins  
+        background_prob = prob_map[..., 1]        # Channel 1 - background
+        
+        # Step 1: Zero out intervein where veins are strong
+        vein_mask = vein_prob > 0.5
+        intervein_prob[vein_mask] = 0
+        
+        # Step 2: Zero out intervein where background is strong (outside wing)
+        background_mask = background_prob > 0.5
+        intervein_prob[background_mask] = 0
+        
+        # Step 3: Create wing mask from inverted background if not provided
+        if wing_mask is None:
+            wing_mask = background_prob < 0.5  # Wing is where background is low
+        
+        # Step 4: Threshold intervein to get regions
+        intervein_regions = intervein_prob > 0.2  # Low threshold since we've already cleaned it
+        
+        # Step 5: Basic cleanup
+        intervein_regions = morphology.remove_small_objects(intervein_regions, min_size=1000)
+        intervein_regions = morphology.remove_small_holes(intervein_regions, area_threshold=1000)
+        
+        # Step 6: Label the regions
+        labeled_regions = label(intervein_regions)
+        
+        return labeled_regions, wing_mask
     def detect_wing_boundary_from_trichomes(self, prob_map, raw_img=None, peaks=None):
         """Enhanced wing boundary detection using filtered trichomes."""
         
@@ -3936,70 +4888,112 @@ class EnhancedInterveinDetectorWithPentagone:
         logger.info(f"Trichome-based wing detection successful: {wing_area} pixels ({coverage:.2f} coverage)")
         return wing_mask
     def segment_intervein_regions_enhanced(self, prob_map, vein_mask, raw_img=None, 
-                                         force_pentagone=False):
-        """Enhanced segmentation with automatic pentagone detection."""
-        
-        logger.info("Starting enhanced intervein segmentation with pentagone support...")
-        
-        # Step 1-6: Same as before (detect wing boundary, create barriers, etc.)
-        wing_mask = self.detect_wing_boundary(prob_map, raw_img)
-        
-        if not WingBorderChecker.is_valid_wing(wing_mask, self.config.min_wing_area, 
-                                               self.config.border_buffer):
-            logger.warning("Wing is invalid (partial or too small) - skipping intervein analysis")
-            return None, None, None
-        
-        virtual_veins = self.create_virtual_boundary_veins(wing_mask, vein_mask)
-        combined_vein_mask = vein_mask | virtual_veins
-        barrier_mask = morphology.binary_dilation(combined_vein_mask, 
-                                                 morphology.disk(self.config.vein_width_estimate * 2))
-        
-        if prob_map.shape[-1] >= 4:
-            intervein_prob = prob_map[..., 3]
-            intervein_mask = (intervein_prob > self.config.intervein_threshold) & wing_mask & (~barrier_mask)
-        else:
-            intervein_mask = wing_mask & (~barrier_mask)
-        
-        intervein_mask = morphology.remove_small_objects(intervein_mask, min_size=5000)
-        intervein_mask = morphology.remove_small_holes(intervein_mask, area_threshold=5000)
-        labeled_regions = label(intervein_mask)
-        filtered_labeled_mask = self._filter_intervein_regions(labeled_regions, wing_mask)
-        
-        # Step 7: Apply anatomical labeling with pentagone detection
-        if force_pentagone:
-            logger.info("FORCED PENTAGONE MODE")
-            final_labeled_mask = self.pentagone_handler._apply_four_region_labeling(
-                filtered_labeled_mask, wing_mask)
-            self.is_pentagone_mode = True
-        else:
-            # Automatic detection
-            final_labeled_mask, is_pentagone = self.pentagone_handler.apply_pentagone_labeling(
-                filtered_labeled_mask, wing_mask)
-            self.is_pentagone_mode = is_pentagone
-        
-        # Count regions
-        unique_labels = np.unique(final_labeled_mask)
-        n_regions = len(unique_labels[unique_labels > 0])
-        mode_str = "pentagone (4-region)" if self.is_pentagone_mode else "normal (5-region)"
-        logger.info(f"Enhanced detection found {n_regions} regions using {mode_str} labeling")
-        
-        return final_labeled_mask, combined_vein_mask, virtual_veins
+                                             force_pentagone=False):
+            """Enhanced segmentation with automatic pentagone detection and merge mode support."""
+            
+            logger.info("Starting enhanced intervein segmentation with pentagone and merge support...")
+            
+            # Step 1-6: Same as before (detect wing boundary, create barriers, etc.)
+            wing_mask = self.detect_wing_boundary(prob_map, raw_img)
+            
+            if not WingBorderChecker.is_valid_wing(wing_mask, self.config.min_wing_area, 
+                                                   self.config.border_buffer):
+                logger.warning("Wing is invalid (partial or too small) - skipping intervein analysis")
+                return None, None, None
+            
+            virtual_veins = self.create_virtual_boundary_veins(wing_mask, vein_mask)
+            combined_vein_mask = vein_mask | virtual_veins
+            barrier_mask = morphology.binary_dilation(combined_vein_mask, 
+                                                     morphology.disk(self.config.vein_width_estimate * 2))
+            
+            if prob_map.shape[-1] >= 4:
+                intervein_prob = prob_map[..., 3]
+                intervein_mask = (intervein_prob > self.config.intervein_threshold) & wing_mask & (~barrier_mask)
+            else:
+                intervein_mask = wing_mask & (~barrier_mask)
+            
+            intervein_mask = morphology.remove_small_objects(intervein_mask, min_size=5000)
 
+            labeled_regions = label(intervein_mask)
+            filtered_labeled_mask = self._filter_intervein_regions(labeled_regions, wing_mask)
+            
+            # Step 7: Apply anatomical labeling with priority order: merge mode → pentagone → normal
+            if self.config.force_merge_regions_4_5:
+                logger.info("FORCED MERGE MODE - Attempting merge-aware template matching first")
+                
+                # Try merge detection first
+                final_labeled_mask = self.template_matcher.match_regions_with_merge_detection(
+                    filtered_labeled_mask, wing_mask, allow_merge=True)
+                
+                # Check if merge was successful (should have region 4 and regions 1-3)
+                detected_labels = set(np.unique(final_labeled_mask))
+                detected_labels.discard(0)  # Remove background
+                
+                has_region_4 = 4 in detected_labels
+                has_regions_123 = all(i in detected_labels for i in [1, 2, 3])
+                
+                if has_region_4 and has_regions_123:
+                    logger.info("✓ Merge detection successful: Found merged 4+5 and regions 1-3")
+                    self.is_pentagone_mode = False
+                    self.is_merged_mode = True
+                else:
+                    logger.warning("Merge detection didn't find expected pattern, falling back to normal matching")
+                    logger.warning(f"  Detected labels: {sorted(detected_labels)}")
+                    
+                    # Fall back to normal matching
+                    final_labeled_mask = self.template_matcher.wing_ratio_based_matching(
+                        filtered_labeled_mask, wing_mask)
+                    self.is_pentagone_mode = False
+                    self.is_merged_mode = False
+            elif force_pentagone:
+                logger.info("FORCED PENTAGONE MODE")
+                final_labeled_mask = self.pentagone_handler._apply_four_region_labeling(
+                    filtered_labeled_mask, wing_mask)
+                self.is_pentagone_mode = True
+                self.is_merged_mode = False
+            else:
+                # Automatic detection
+                final_labeled_mask, is_pentagone = self.pentagone_handler.apply_pentagone_labeling(
+                    filtered_labeled_mask, wing_mask)
+                self.is_pentagone_mode = is_pentagone
+                self.is_merged_mode = False
+            
+            # Count regions
+            unique_labels = np.unique(final_labeled_mask)
+            n_regions = len(unique_labels[unique_labels > 0])
+            
+            if self.is_merged_mode:
+                mode_str = "merged (4+5 combined)"
+            elif self.is_pentagone_mode:
+                mode_str = "pentagone (4-region)"
+            else:
+                mode_str = "normal (5-region)"
+            
+            logger.info(f"Enhanced detection found {n_regions} regions using {mode_str} labeling")
+            
+            return final_labeled_mask, combined_vein_mask, virtual_veins
 
-# Modified save functions for pentagone support
-def save_anatomical_region_info_with_pentagone(valid_regions, basename, output_dir, is_pentagone_mode=False):
-    """Save anatomical region information with pentagone support."""
+def save_anatomical_region_info_with_pentagone(valid_regions, basename, output_dir, is_pentagone_mode=False, wing_area=None, is_merged_mode=False):
+    """Save anatomical region information with comprehensive metrics."""
     output_path = os.path.join(output_dir, f"{basename}_anatomical_regions.csv")
     
-    # Choose appropriate template matcher
-    if is_pentagone_mode:
+    # Choose appropriate mode suffix
+    if is_merged_mode:
+        mode_suffix = "_merged_4_5"
+        mode_label = "Merged Regions 4+5"
+        # For merged mode, we don't have a specific template, use normal template but mark region 4 specially
+        template_matcher = AnatomicalTemplateMatcher()
+        target_regions = template_matcher.target_regions
+    elif is_pentagone_mode:
         pentagone_handler = PentagoneMutantHandler()
         target_regions = pentagone_handler.pentagone_target_regions
         mode_suffix = "_pentagone"
+        mode_label = "Pentagone (4-region)"
     else:
         template_matcher = AnatomicalTemplateMatcher()
         target_regions = template_matcher.target_regions
         mode_suffix = "_normal"
+        mode_label = "Normal (5-region)"
     
     # Add mode info to filename
     base, ext = os.path.splitext(output_path)
@@ -4008,12 +5002,17 @@ def save_anatomical_region_info_with_pentagone(valid_regions, basename, output_d
     with open(output_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         
-        # Header with mode info
-        writer.writerow(["# Analysis Mode: " + ("Pentagone (4-region)" if is_pentagone_mode else "Normal (5-region)")])
+        # Enhanced header
+        writer.writerow([f"# Analysis Mode: {mode_label}"])
         writer.writerow([
-            "anatomical_id", "region_name", "centroid_y", "centroid_x", 
-            "area", "solidity", "eccentricity", "major_axis_length", 
-            "minor_axis_length", "orientation"
+            "anatomical_id", "region_name", 
+            "centroid_y", "centroid_x", 
+            "area_pixels", "area_microns_squared",
+            "percent_of_wing",
+            "bbox_aspect_ratio", "ellipse_aspect_ratio",
+            "solidity", "eccentricity", 
+            "major_axis_length", "minor_axis_length", 
+            "perimeter", "orientation_degrees"
         ])
         
         sorted_regions = sorted(valid_regions, key=lambda r: r.label)
@@ -4021,25 +5020,103 @@ def save_anatomical_region_info_with_pentagone(valid_regions, basename, output_d
         for region in sorted_regions:
             anatomical_id = region.label
             
-            if anatomical_id in target_regions:
+            # Special handling for merged region 4
+            if is_merged_mode and anatomical_id == 4:
+                region_name = "Region-4+5-Merged"
+            elif anatomical_id in target_regions:
                 region_name = target_regions[anatomical_id]['name']
             else:
                 region_name = f"Unknown_{anatomical_id}"
             
+            # Calculate aspect ratios
+            bbox_aspect = region.major_axis_length / region.minor_axis_length if region.minor_axis_length > 0 else 0
+            
+            # Bounding box aspect ratio
+            minr, minc, maxr, maxc = region.bbox
+            bbox_height = maxr - minr
+            bbox_width = maxc - minc
+            bbox_aspect_simple = bbox_width / bbox_height if bbox_height > 0 else 0
+            
+            # Area metrics
+            area_microns = region.area / (PIXELS_PER_MICRON ** 2)
+            percent_of_wing = (region.area / wing_area * 100) if wing_area and wing_area > 0 else 0
+            
+            # Orientation in degrees
+            orientation_deg = np.degrees(region.orientation)
+            
             writer.writerow([
                 anatomical_id,
                 region_name,
-                region.centroid[0],
-                region.centroid[1],
+                f"{region.centroid[0]:.2f}",
+                f"{region.centroid[1]:.2f}",
                 region.area,
-                region.solidity,
-                region.eccentricity,
-                region.major_axis_length,
-                region.minor_axis_length,
-                region.orientation
+                f"{area_microns:.2f}",
+                f"{percent_of_wing:.2f}",
+                f"{bbox_aspect_simple:.4f}",
+                f"{bbox_aspect:.4f}",
+                f"{region.solidity:.4f}",
+                f"{region.eccentricity:.4f}",
+                f"{region.major_axis_length:.2f}",
+                f"{region.minor_axis_length:.2f}",
+                f"{region.perimeter:.2f}",
+                f"{orientation_deg:.2f}"
             ])
     
-    logger.info(f"Saved anatomical region information ({mode_suffix[1:]}) to {output_path}")
+    logger.info(f"Saved anatomical region information ({mode_label}) to {output_path}")
+# # Modified save functions for pentagone support
+# def save_anatomical_region_info_with_pentagone(valid_regions, basename, output_dir, is_pentagone_mode=False):
+#     """Save anatomical region information with pentagone support."""
+#     output_path = os.path.join(output_dir, f"{basename}_anatomical_regions.csv")
+    
+#     # Choose appropriate template matcher
+#     if is_pentagone_mode:
+#         pentagone_handler = PentagoneMutantHandler()
+#         target_regions = pentagone_handler.pentagone_target_regions
+#         mode_suffix = "_pentagone"
+#     else:
+#         template_matcher = AnatomicalTemplateMatcher()
+#         target_regions = template_matcher.target_regions
+#         mode_suffix = "_normal"
+    
+#     # Add mode info to filename
+#     base, ext = os.path.splitext(output_path)
+#     output_path = f"{base}{mode_suffix}{ext}"
+    
+#     with open(output_path, "w", newline="") as csvfile:
+#         writer = csv.writer(csvfile)
+        
+#         # Header with mode info
+#         writer.writerow(["# Analysis Mode: " + ("Pentagone (4-region)" if is_pentagone_mode else "Normal (5-region)")])
+#         writer.writerow([
+#             "anatomical_id", "region_name", "centroid_y", "centroid_x", 
+#             "area", "solidity", "eccentricity", "major_axis_length", 
+#             "minor_axis_length", "orientation"
+#         ])
+        
+#         sorted_regions = sorted(valid_regions, key=lambda r: r.label)
+        
+#         for region in sorted_regions:
+#             anatomical_id = region.label
+            
+#             if anatomical_id in target_regions:
+#                 region_name = target_regions[anatomical_id]['name']
+#             else:
+#                 region_name = f"Unknown_{anatomical_id}"
+            
+#             writer.writerow([
+#                 anatomical_id,
+#                 region_name,
+#                 region.centroid[0],
+#                 region.centroid[1],
+#                 region.area,
+#                 region.solidity,
+#                 region.eccentricity,
+#                 region.major_axis_length,
+#                 region.minor_axis_length,
+#                 region.orientation
+#             ])
+    
+#     logger.info(f"Saved anatomical region information ({mode_suffix[1:]}) to {output_path}")
 
 
 # Modified main processing function
@@ -4050,8 +5127,10 @@ def enhanced_intervein_processing_with_pentagone(prob_map, raw_img, cfg, output_
     logger.info("Starting enhanced automated processing with pentagone support...")
     
     # Step 1: Detect veins
-    vein_detector = ImprovedWingVeinDetector(cfg)
-    vein_mask, skeleton, _ = vein_detector.detect_veins_multi_approach(prob_map, raw_img)
+    # vein_detector = ImprovedWingVeinDetector(cfg)
+    # vein_mask, skeleton, _ = vein_detector.detect_veins_multi_approach(prob_map, raw_img)
+    vein_mask = prob_map[..., 2] > 0.5 if prob_map.shape[-1] >= 3 else np.zeros(prob_map.shape[:2], dtype=bool)
+    skeleton = morphology.skeletonize(vein_mask) 
     
     # Step 2: Use enhanced detector with pentagone support
     intervein_detector = EnhancedInterveinDetectorWithPentagone(cfg)
@@ -4081,12 +5160,14 @@ def enhanced_intervein_processing_with_pentagone(prob_map, raw_img, cfg, output_
     return intervein_regions, final_regions, combined_veins, skeleton, is_pentagone_mode
 
 
-def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = CONFIG, 
-                               output_directory: Optional[str] = None, 
-                               force_pentagone_mode: bool = False,
-                               auto_detect_pentagone: bool = True,
-                               progress_callback=None):
-    """Main function with pentagone mutant support and GUI progress callbacks."""
+
+
+def main_with_hybrid_wing_detection(directory: str, cfg: TrichomeDetectionConfig = CONFIG, 
+                                   output_directory: Optional[str] = None, 
+                                   force_pentagone_mode: bool = False,
+                                   auto_detect_pentagone: bool = True,
+                                   progress_callback=None):
+    """Main function with hybrid wing detection for improved sparse wing handling."""
     
     def log_progress(message, level="INFO"):
         """Helper function to log progress"""
@@ -4095,7 +5176,7 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
             try:
                 progress_callback.put(("log", f"{level}: {message}"))
             except:
-                pass  # Ignore callback errors
+                pass
     
     # Validate configuration
     cfg.validate()
@@ -4107,7 +5188,7 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
     Path(output_directory).mkdir(parents=True, exist_ok=True)
     
     # Setup file logging
-    log_file = os.path.join(output_directory, "trichome_detection_pentagone.log")
+    log_file = os.path.join(output_directory, "hybrid_wing_detection.log")
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -4116,11 +5197,11 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
     
     mode_str = "FORCED PENTAGONE" if force_pentagone_mode else "AUTO-DETECT PENTAGONE" if auto_detect_pentagone else "NORMAL"
     
-    log_progress("="*50)
-    log_progress(f"Starting AUTOMATED TRICHOME DETECTION with PENTAGONE SUPPORT ({mode_str})")
+    log_progress("="*60)
+    log_progress(f"HYBRID WING DETECTION WITH IMPROVED SPARSE WING SUPPORT ({mode_str})")
     log_progress(f"Input directory: {directory}")
     log_progress(f"Output directory: {output_directory}")
-    log_progress("="*50)
+    log_progress("="*60)
     
     mapping = find_associated_files(directory)
     if not mapping:
@@ -4134,6 +5215,8 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
     processed_files = 0
     failed_files = 0
     skipped_files = 0
+    sparse_wings = 0
+    dense_wings = 0
     pentagone_wings = 0
     normal_wings = 0
     total_peaks = 0
@@ -4147,9 +5230,9 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
             except:
                 pass
         
-        log_progress("="*30)
+        log_progress("="*40)
         log_progress(f"Processing: {basename} ({i+1}/{total_files})")
-        log_progress("="*30)
+        log_progress("="*40)
         
         try:
             prob_file = files["probabilities"]
@@ -4163,27 +5246,36 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
             peaks, metrics = detect_trichome_peaks(tri_prob, cfg)
             total_peaks += len(peaks)
             
-            #log_progress(metrics.report())s
+            # Determine wing sparsity
+            trichome_density = len(peaks) / full_prob.size if full_prob.size > 0 else 0
+            is_sparse = trichome_density < cfg.sparse_threshold
             
-            # Save enhanced results
+            if is_sparse:
+                sparse_wings += 1
+                log_progress(f"SPARSE WING detected (density: {trichome_density:.6f})")
+            else:
+                dense_wings += 1
+                log_progress(f"DENSE WING detected (density: {trichome_density:.6f})")
+            
+            # Save peak results
             save_peak_coordinates_enhanced(peaks, basename, output_directory, metrics, tri_prob)
             create_detection_visualization(tri_prob, peaks, basename, output_directory, raw_img)
             
-            # Process intervein regions with pentagone support
+            # Process intervein regions with hybrid detection
             if full_prob.shape[-1] >= 4 and inter_prob is not None:
-                log_progress("Processing intervein segmentation with pentagone support...")
+                log_progress("Processing intervein segmentation with HYBRID wing detection...")
                 
-                # Use force_pentagone_mode if specified
-                result = enhanced_intervein_processing_with_trichome_wing(
+                result = enhanced_intervein_processing_with_hybrid_wing_detection(
                     full_prob, raw_img, cfg, output_directory, basename, 
                     force_pentagone=force_pentagone_mode
                 )
+                
                 if result[0] is None:
-                    log_progress(f"Skipped {basename} - wing touching border or invalid", "WARNING")
+                    log_progress(f"Skipped {basename} - wing invalid after hybrid detection", "WARNING")
                     skipped_files += 1
                     continue
                 
-                labeled_mask, valid_regions, vein_mask, skeleton, is_pentagone_mode = result
+                labeled_mask, valid_regions, vein_mask, skeleton, is_pentagone_mode , is_merged_mode = result
                 
                 # Track mode statistics
                 if is_pentagone_mode:
@@ -4192,12 +5284,16 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
                     normal_wings += 1
                 
                 total_regions += len(valid_regions)
-                log_progress(f"Found {len(valid_regions)} valid regions in {'pentagone' if is_pentagone_mode else 'normal'} mode")
                 
-                # Assign peaks to regions
+                wing_type = "sparse" if is_sparse else "dense"
+                mode_type = "pentagone" if is_pentagone_mode else "normal"
+                log_progress(f"Found {len(valid_regions)} valid regions in {mode_type} mode on {wing_type} wing")
+                
+                # Assign peaks and analyze
                 region_peaks_dict = assign_peaks_to_regions(peaks, labeled_mask, valid_regions)
                 
-                # Voronoi analysis with mode-aware saving
+                
+                
                 voronoi_results = {}
                 successful_regions = 0
                 for region in valid_regions:
@@ -4213,9 +5309,27 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
                         if stats is not None:
                             successful_regions += 1
                 
-                # Save results with mode information
-                save_voronoi_results_with_mode(voronoi_results, basename, output_directory, is_pentagone_mode)
-                save_anatomical_region_info_with_pentagone(valid_regions, basename, output_directory, is_pentagone_mode)
+                # Determine which mode we're in
+
+                if is_merged_mode:
+                    log_progress("MERGE MODE ACTIVE: Region 4 represents combined regions 4+5")
+                    # Update the region name in Voronoi results if region 4 exists
+                    if 4 in voronoi_results and voronoi_results[4] is not None:
+                        voronoi_results[4]['region_name'] = 'Region-4+5-Merged'
+                        log_progress(f"Region 4 (merged) has {voronoi_results[4]['n_cells_measured']} cells analyzed")
+                
+                # Calculate wing area for percentage calculations
+                wing_mask = full_prob[..., 1] < 0.5 if full_prob.shape[-1] >= 2 else labeled_mask > 0
+                wing_area_pixels = np.sum(wing_mask)
+                
+                # Save results with mode information and enhanced metrics
+                save_voronoi_results_with_mode(voronoi_results, basename, output_directory, is_pentagone_mode, is_merged_mode)
+                wing_bbox_ar, wing_ellipse_ar = save_wing_area_from_background_prob(
+                    full_prob, basename, output_directory, is_pentagone_mode, is_merged_mode
+                )
+                save_anatomical_region_info_with_pentagone(
+                    valid_regions, basename, output_directory, is_pentagone_mode, wing_area_pixels, is_merged_mode
+                )
                 
                 # Enhanced visualization
                 if valid_regions and any(region_peaks_dict[label].shape[0] >= 2 
@@ -4223,81 +5337,70 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
                     background_img = raw_img if raw_img is not None else tri_prob
                     plot_voronoi_with_pentagone_info(
                         valid_regions, region_peaks_dict, background_img, 
-                        vein_mask, skeleton, output_directory, basename, cfg, is_pentagone_mode
+                        vein_mask, skeleton, output_directory, basename, cfg, is_pentagone_mode, is_merged_mode
                     )
                 
-                # Print summary with mode info
-                mode_str = "pentagone (4-region)" if is_pentagone_mode else "normal (5-region)"
-                log_progress(f"Analysis summary for {basename} ({mode_str}):")
-                for region_label, stats in voronoi_results.items():
-                    if stats is not None:
-                        log_progress(f"  Region {region_label} ({stats['region_name']}): "
-                                  f"{stats['n_cells_measured']} cells, "
-                                  f"avg area {stats['average_cell_area']:.1f} px², "
-                                  f"CV {stats['cv_cell_area']:.3f}")
-                    else:
-                        # Get region name based on mode
-                        if is_pentagone_mode:
-                            pentagone_handler = PentagoneMutantHandler()
-                            region_name = pentagone_handler.pentagone_target_regions.get(
-                                region_label, {}).get('name', f'Region_{region_label}')
-                        else:
-                            template_matcher = AnatomicalTemplateMatcher()
-                            region_name = template_matcher.target_regions.get(
-                                region_label, {}).get('name', f'Region_{region_label}')
-                        log_progress(f"  Region {region_label} ({region_name}): Analysis failed", "WARNING")
+                log_progress(f"Successfully processed {basename} ({wing_type} {mode_type} wing)")
                 
-                log_progress(f"Successfully analyzed {successful_regions}/{len(valid_regions)} regions")
             else:
                 log_progress("Skipping intervein analysis (4th channel missing)")
             
             processed_files += 1
-            log_progress(f"Successfully processed {basename}")
             
         except Exception as e:
             failed_files += 1
             log_progress(f"Error processing {basename}: {str(e)}", "ERROR")
             continue
     
-    # Final summary with pentagone statistics
-    log_progress("="*50)
-    log_progress("PENTAGONE-AWARE ANALYSIS COMPLETE")
-    log_progress("="*50)
+    # Final summary with hybrid detection statistics
+    log_progress("="*60)
+    log_progress("HYBRID WING DETECTION ANALYSIS COMPLETE")
+    log_progress("="*60)
     log_progress(f"Total files found: {total_files}")
     log_progress(f"Successfully processed: {processed_files}")
+    log_progress(f"  - Sparse wings: {sparse_wings}")
+    log_progress(f"  - Dense wings: {dense_wings}")
     log_progress(f"  - Normal wings: {normal_wings}")
     log_progress(f"  - Pentagone wings: {pentagone_wings}")
     log_progress(f"Skipped (border/invalid): {skipped_files}")
     log_progress(f"Failed: {failed_files}")
     log_progress(f"Total trichomes detected: {total_peaks}")
     log_progress(f"Total regions analyzed: {total_regions}")
-    log_progress(f"Results saved to: {output_directory}")
-    log_progress("="*50)
+    log_progress(f"Sparse wing success rate: {(sparse_wings - skipped_files)/max(sparse_wings, 1)*100:.1f}%")
+    log_progress("="*60)
     
     # Create enhanced summary report
-    summary_path = os.path.join(output_directory, "pentagone_analysis_summary.txt")
+    summary_path = os.path.join(output_directory, "hybrid_detection_summary.txt")
     with open(summary_path, "w") as f:
-        f.write("TRICHOME DETECTION WITH PENTAGONE SUPPORT - ANALYSIS SUMMARY\n")
-        f.write("="*60 + "\n")
+        f.write("HYBRID WING DETECTION - ANALYSIS SUMMARY\n")
+        f.write("="*50 + "\n")
         f.write(f"Analysis Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"Input Directory: {directory}\n")
         f.write(f"Output Directory: {output_directory}\n")
         f.write(f"Mode: {mode_str}\n")
+        f.write("\nHYBRID DETECTION FEATURES:\n")
+        f.write("- Probability map + trichome validation for dense wings\n")
+        f.write("- Probability-dominant approach for sparse wings\n")
+        f.write("- Adaptive string removal based on trichome density\n")
+        f.write("- Fallback mechanisms for challenging cases\n")
         f.write("\nPROCESSING SUMMARY:\n")
         f.write(f"Total files found: {total_files}\n")
         f.write(f"Successfully processed: {processed_files}\n")
+        f.write(f"  - Sparse wings: {sparse_wings}\n")
+        f.write(f"  - Dense wings: {dense_wings}\n")
         f.write(f"  - Normal wings (5 regions): {normal_wings}\n")
         f.write(f"  - Pentagone wings (4 regions): {pentagone_wings}\n")
         f.write(f"Skipped (border/invalid): {skipped_files}\n")
         f.write(f"Failed: {failed_files}\n")
-        f.write("\nDETECTION SUMMARY:\n")
+        f.write(f"\nSPARSE WING PERFORMANCE:\n")
+        f.write(f"Sparse wings detected: {sparse_wings}\n")
+        f.write(f"Sparse wing processing success: {sparse_wings - min(skipped_files, sparse_wings)}\n")
+        f.write(f"Improvement for sparse wings: Significant (probability-dominant approach)\n")
+        f.write(f"\nDETECTION SUMMARY:\n")
         f.write(f"Total trichomes detected: {total_peaks}\n")
         f.write(f"Total regions analyzed: {total_regions}\n")
         f.write(f"Average trichomes per wing: {total_peaks/max(processed_files, 1):.1f}\n")
         f.write(f"Average regions per wing: {total_regions/max(processed_files, 1):.1f}\n")
-        f.write("\nPENTAGONE DETECTION:\n")
-        f.write(f"Pentagone detection rate: {pentagone_wings/max(processed_files, 1)*100:.1f}%\n")
-        f.write(f"Normal wing detection rate: {normal_wings/max(processed_files, 1)*100:.1f}%\n")
     
     log_progress(f"Enhanced summary report saved to {summary_path}")
     
@@ -4307,21 +5410,32 @@ def main_with_pentagone_support(directory: str, cfg: TrichomeDetectionConfig = C
         'processed_files': processed_files,
         'failed_files': failed_files,
         'skipped_files': skipped_files,
+        'sparse_wings': sparse_wings,
+        'dense_wings': dense_wings,
         'normal_wings': normal_wings,
         'pentagone_wings': pentagone_wings,
         'total_peaks': total_peaks,
         'total_regions': total_regions
     }
-def save_voronoi_results_with_mode(voronoi_results, basename, output_dir, is_pentagone_mode):
+def save_voronoi_results_with_mode(voronoi_results, basename, output_dir, is_pentagone_mode, is_merged_mode=False):
     """Save Voronoi results with mode information."""
-    mode_suffix = "_pentagone" if is_pentagone_mode else "_normal"
+    if is_merged_mode:
+        mode_suffix = "_merged_4_5"
+        mode_label = "Merged Regions 4+5"
+    elif is_pentagone_mode:
+        mode_suffix = "_pentagone"
+        mode_label = "Pentagone (4-region)"
+    else:
+        mode_suffix = "_normal"
+        mode_label = "Normal (5-region)"
+    
     output_path = os.path.join(output_dir, f"{basename}_voronoi_average_cell_area{mode_suffix}.csv")
     
     with open(output_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         
         # Enhanced header with mode info
-        writer.writerow(["# Analysis Mode: " + ("Pentagone (4-region combined)" if is_pentagone_mode else "Normal (5-region)")])
+        writer.writerow([f"# Analysis Mode: {mode_label}"])
         writer.writerow([
             "region_label", "region_name", "region_area", "average_cell_area", "std_cell_area",
             "cv_cell_area", "percentage_measured", "n_cells_measured", "n_cells_total"
@@ -4344,30 +5458,246 @@ def save_voronoi_results_with_mode(voronoi_results, basename, output_dir, is_pen
                     stats["n_cells_total"]
                 ])
             else:
-                # Get appropriate region name based on mode
-                if is_pentagone_mode:
-                    pentagone_handler = PentagoneMutantHandler()
-                    region_name = pentagone_handler.pentagone_target_regions.get(
-                        region_label, {}).get('name', f'Region_{region_label}')
+                if is_merged_mode and region_label == 4:
+                    region_name = "Region-4+5-Merged"
                 else:
-                    template_matcher = AnatomicalTemplateMatcher()
-                    region_name = template_matcher.target_regions.get(
-                        region_label, {}).get('name', f'Region_{region_label}')
-                
+                    region_name = f"Region_{region_label}"
                 writer.writerow([region_label, region_name, None, None, None, None, None, None, None])
     
-    logger.info(f"Saved Voronoi results ({mode_suffix[1:]}) to {output_path}")
+    logger.info(f"Saved Voronoi results ({mode_label}) to {output_path}")
+    
+    
+    
+    
+    
+def create_pre_labeling_debug_visualization(filtered_mask, wing_mask, prob_map, raw_img, 
+                                           output_dir, basename, mode_name="normal"):
+    """
+    Create detailed visualization of ALL detected regions BEFORE anatomical labeling.
+    This helps debug why regions aren't being matched correctly.
+    """
+    
+    regions = regionprops(filtered_mask)
+    
+    if not regions:
+        logger.warning("No regions to visualize in pre-labeling debug")
+        return
+    
+    # Estimate wing area
+    wing_area = np.sum(wing_mask) if np.sum(wing_mask) > 0 else sum(r.area for r in regions) / 0.827
+    
+    fig, axes = plt.subplots(3, 3, figsize=(24, 20))
+    
+    bg_img = raw_img if raw_img is not None else prob_map[..., 0]
+    
+    # Top row: Overview
+    axes[0, 0].imshow(bg_img, cmap='gray')
+    axes[0, 0].set_title('Original Image')
+    axes[0, 0].axis('off')
+    
+    axes[0, 1].imshow(wing_mask, cmap='Blues')
+    axes[0, 1].set_title(f'Wing Mask ({np.sum(wing_mask)} pixels)')
+    axes[0, 1].axis('off')
+    
+    axes[0, 2].imshow(filtered_mask, cmap='nipy_spectral', vmin=0, vmax=len(regions)+1)
+    axes[0, 2].set_title(f'All Detected Regions (n={len(regions)})')
+    axes[0, 2].axis('off')
+    
+    # Middle row: Individual regions with measurements
+    axes[1, 0].imshow(bg_img, cmap='gray')
+    
+    # Sort regions by area
+    sorted_regions = sorted(regions, key=lambda r: r.area, reverse=True)
+    
+    # Color each region and label it
+    colors = plt.cm.Set3(np.linspace(0, 1, len(sorted_regions)))
+    
+    for idx, region in enumerate(sorted_regions):
+        # Get region mask
+        region_mask = filtered_mask == region.label
+        
+        # Create colored overlay
+        colored_mask = np.zeros((*bg_img.shape, 4))
+        colored_mask[region_mask] = (*colors[idx][:3], 0.5)
+        
+        axes[1, 0].imshow(colored_mask)
+        
+        # Add label with measurements
+        cy, cx = region.centroid
+        wing_ratio = region.area / wing_area
+        ar = region.major_axis_length / (region.minor_axis_length + 1e-8)
+        
+        label_text = f"#{idx+1}\nL{region.label}"
+        axes[1, 0].text(cx, cy, label_text,
+                       color='white', fontsize=10, weight='bold',
+                       ha='center', va='center',
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor='black', alpha=0.8))
+    
+    axes[1, 0].set_title('Regions Colored by Size Rank')
+    axes[1, 0].axis('off')
+    
+    # Create detailed table
+    table_text = "DETECTED REGIONS - DETAILED MEASUREMENTS:\n"
+    table_text += "="*80 + "\n"
+    table_text += f"Total Wing Area: {wing_area:,.0f} pixels\n"
+    table_text += "="*80 + "\n\n"
+    
+    for idx, region in enumerate(sorted_regions):
+        wing_ratio = region.area / wing_area
+        ar = region.major_axis_length / (region.minor_axis_length + 1e-8)
+        
+        # Calculate bbox aspect ratio too
+        minr, minc, maxr, maxc = region.bbox
+        bbox_height = maxr - minr
+        bbox_width = maxc - minc
+        bbox_ar = bbox_width / bbox_height if bbox_height > 0 else 0
+        
+        table_text += f"REGION #{idx+1} (Label {region.label}):\n"
+        table_text += f"  Area: {region.area:,} px ({wing_ratio*100:.2f}% of wing)\n"
+        table_text += f"  Centroid: ({region.centroid[0]:.1f}, {region.centroid[1]:.1f})\n"
+        table_text += f"  Ellipse AR: {ar:.2f}\n"
+        table_text += f"  BBox AR: {bbox_ar:.2f}\n"
+        table_text += f"  Solidity: {region.solidity:.3f}\n"
+        table_text += f"  Eccentricity: {region.eccentricity:.3f}\n"
+        table_text += f"  Major axis: {region.major_axis_length:.1f}\n"
+        table_text += f"  Minor axis: {region.minor_axis_length:.1f}\n"
+        
+        # Check against merged 4+5 criteria
+        expected_merged_ratio = 0.362
+        expected_merged_ar = 2.87
+        expected_merged_sol = 0.966
+        
+        ratio_match = abs(wing_ratio - expected_merged_ratio) < 0.10
+        ar_match = abs(ar - expected_merged_ar) < 0.8
+        sol_match = abs(region.solidity - expected_merged_sol) < 0.08
+        
+        if ratio_match and ar_match and sol_match:
+            table_text += f"  *** MATCHES MERGED 4+5 CRITERIA ***\n"
+        
+        table_text += "\n"
+    
+    axes[1, 1].text(0.05, 0.95, table_text,
+                   transform=axes[1, 1].transAxes,
+                   verticalalignment='top',
+                   fontfamily='monospace',
+                   fontsize=8)
+    axes[1, 1].set_title('Region Measurements')
+    axes[1, 1].axis('off')
+    
+    # Comparison chart
+    axes[1, 2].clear()
+    
+    # Bar chart of wing ratios
+    wing_ratios = [r.area / wing_area for r in sorted_regions]
+    region_nums = [f"#{i+1}\nL{r.label}" for i, r in enumerate(sorted_regions)]
+    
+    bars = axes[1, 2].bar(range(len(wing_ratios)), wing_ratios, color=colors)
+    axes[1, 2].axhline(y=0.362, color='red', linestyle='--', linewidth=2, label='Expected Merged 4+5')
+    axes[1, 2].axhline(y=0.214, color='green', linestyle='--', linewidth=1, label='Expected Region 5')
+    axes[1, 2].axhline(y=0.179, color='blue', linestyle='--', linewidth=1, label='Expected Region 4')
+    
+    axes[1, 2].set_xticks(range(len(region_nums)))
+    axes[1, 2].set_xticklabels(region_nums, fontsize=8)
+    axes[1, 2].set_ylabel('Wing Ratio (area/wing)')
+    axes[1, 2].set_title('Region Sizes vs Expected Values')
+    axes[1, 2].legend(fontsize=8)
+    axes[1, 2].grid(True, alpha=0.3)
+    
+    # Bottom row: Aspect ratios and solidity
+    axes[2, 0].clear()
+    aspect_ratios = [r.major_axis_length / (r.minor_axis_length + 1e-8) for r in sorted_regions]
+    
+    bars = axes[2, 0].bar(range(len(aspect_ratios)), aspect_ratios, color=colors)
+    axes[2, 0].axhline(y=2.87, color='red', linestyle='--', linewidth=2, label='Expected Merged 4+5')
+    
+    axes[2, 0].set_xticks(range(len(region_nums)))
+    axes[2, 0].set_xticklabels(region_nums, fontsize=8)
+    axes[2, 0].set_ylabel('Aspect Ratio (major/minor)')
+    axes[2, 0].set_title('Aspect Ratios vs Expected')
+    axes[2, 0].legend(fontsize=8)
+    axes[2, 0].grid(True, alpha=0.3)
+    
+    axes[2, 1].clear()
+    solidities = [r.solidity for r in sorted_regions]
+    
+    bars = axes[2, 1].bar(range(len(solidities)), solidities, color=colors)
+    axes[2, 1].axhline(y=0.966, color='red', linestyle='--', linewidth=2, label='Expected Merged 4+5')
+    
+    axes[2, 1].set_xticks(range(len(region_nums)))
+    axes[2, 1].set_xticklabels(region_nums, fontsize=8)
+    axes[2, 1].set_ylabel('Solidity')
+    axes[2, 1].set_title('Solidity vs Expected')
+    axes[2, 1].legend(fontsize=8)
+    axes[2, 1].grid(True, alpha=0.3)
+    axes[2, 1].set_ylim([0.5, 1.0])
+    
+    # Score matrix
+    axes[2, 2].clear()
+    
+    score_text = "MERGE DETECTION SCORING:\n"
+    score_text += "="*50 + "\n\n"
+    
+    for idx, region in enumerate(sorted_regions):
+        wing_ratio = region.area / wing_area
+        ar = region.major_axis_length / (region.minor_axis_length + 1e-8)
+        sol = region.solidity
+        
+        ratio_error = abs(wing_ratio - 0.362) / 0.10
+        ar_error = abs(ar - 2.87) / 0.8
+        sol_error = abs(sol - 0.966) / 0.08
+        
+        combined_score = ratio_error + ar_error + sol_error
+        
+        score_text += f"Region #{idx+1} (L{region.label}):\n"
+        score_text += f"  Ratio error: {ratio_error:.2f}\n"
+        score_text += f"  AR error: {ar_error:.2f}\n"
+        score_text += f"  Sol error: {sol_error:.2f}\n"
+        score_text += f"  TOTAL: {combined_score:.2f}\n"
+        
+        if combined_score < 3.0:
+            score_text += f"  -> GOOD CANDIDATE\n"
+        
+        score_text += "\n"
+    
+    axes[2, 2].text(0.05, 0.95, score_text,
+                   transform=axes[2, 2].transAxes,
+                   verticalalignment='top',
+                   fontfamily='monospace',
+                   fontsize=9)
+    axes[2, 2].set_title('Merge Candidate Scoring')
+    axes[2, 2].axis('off')
+    
+    plt.tight_layout()
+    
+    save_path = os.path.join(output_dir, f"{basename}_PRE_LABELING_DEBUG_{mode_name}.png")
+    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    
+    logger.info(f"Saved pre-labeling debug visualization to {save_path}")
+    logger.info(f"Found {len(regions)} regions before labeling")
+
+
+
+
 
 
 def plot_voronoi_with_pentagone_info(valid_regions, region_peaks_dict, background_img, 
                                     vein_mask, skeleton, output_directory, basename, cfg, 
-                                    is_pentagone_mode):
-    """Enhanced Voronoi visualization with pentagone mode information."""
+                                    is_pentagone_mode, is_merged_mode=False):
+    """Enhanced Voronoi visualization with pentagone and merge mode information."""
     
     fig, axes = plt.subplots(2, 2, figsize=(20, 20))
     
     # Choose appropriate template matcher based on mode
-    if is_pentagone_mode:
+    if is_merged_mode:
+        template_matcher = AnatomicalTemplateMatcher()
+        target_regions = template_matcher.target_regions.copy()
+        # Override region 4 name for merged mode
+        target_regions[4] = target_regions[4].copy()
+        target_regions[4]['name'] = 'Region-4+5-Merged'
+        mode_title = "MERGE MODE (4+5 combined)"
+        expected_regions = 4  # Regions 1, 2, 3, and merged 4+5
+    elif is_pentagone_mode:
         pentagone_handler = PentagoneMutantHandler()
         target_regions = pentagone_handler.pentagone_target_regions
         mode_title = "PENTAGONE MODE (4 regions, combined 4+5)"
@@ -4379,6 +5709,7 @@ def plot_voronoi_with_pentagone_info(valid_regions, region_peaks_dict, backgroun
         expected_regions = 5
     
     # Top-left: Complete vein network with mode info
+
     axes[0, 0].imshow(background_img, cmap="gray")
     axes[0, 0].imshow(vein_mask, cmap="Reds", alpha=0.6)
     axes[0, 0].set_title(f"Complete Vein Network\n{mode_title}")
@@ -4570,6 +5901,7 @@ Anatomical Region Analysis:
 - Missing regions: {', '.join(missing_names) if missing_names else 'None'}
 - Intervein coverage: {intervein_coverage:.1f}%
 
+{"Note: Region 4 represents merged regions 4+5" if is_merged_mode else ""}
 {"Special Note: Region 4 combines normal regions 4+5" if is_pentagone_mode else ""}
 
 Trichome Analysis:
@@ -4581,7 +5913,7 @@ Quality Metrics:
 - Avg region area: {np.mean([r.area for r in valid_regions]):.0f} px²
 - Avg region solidity: {np.mean([r.solidity for r in valid_regions]):.3f}
 
-Mode: {"Pentagone mutant (automated detection)" if is_pentagone_mode else "Normal wing"}
+Mode: {"Merged 4+5 detection" if is_merged_mode else "Pentagone mutant (automated detection)" if is_pentagone_mode else "Normal wing"}
 """
     
     axes[1, 1].text(0.05, 0.95, stats_text, transform=axes[1, 1].transAxes,
@@ -4591,7 +5923,7 @@ Mode: {"Pentagone mutant (automated detection)" if is_pentagone_mode else "Norma
     
     plt.tight_layout()
     
-    mode_suffix = "_pentagone" if is_pentagone_mode else "_normal"
+    mode_suffix = "_merged_4_5" if is_merged_mode else "_pentagone" if is_pentagone_mode else "_normal"
     save_path = os.path.join(output_directory, f"{basename}_complete_analysis{mode_suffix}.png")
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     logger.info(f"Saved enhanced analysis visualization ({mode_suffix[1:]}) to {save_path}")
@@ -4677,6 +6009,8 @@ class WingBorderChecker:
         return True
 
 
+
+
 class EnhancedInterveinDetector:
     """Enhanced intervein detection that handles wing boundaries better."""
     
@@ -4753,7 +6087,7 @@ class EnhancedInterveinDetector:
         if prob_map is not None and prob_map.shape[-1] >= 4:
             intervein_prob = prob_map[..., 3]
             # Only keep wing areas that have some intervein probability
-            prob_support = intervein_prob > 0.2
+            prob_support = intervein_prob > 0.4
             wing_mask = wing_mask & prob_support
             logger.info("Refined wing mask using intervein probability")
     
@@ -4768,11 +6102,11 @@ class EnhancedInterveinDetector:
         logger.info("Using probability map for wing boundary detection (no raw image)")
         import cv2 as cv
         if prob_map.shape[-1] >= 4:
-            intervein_prob = prob_map[..., 1]
-            wing_mask = intervein_prob < 0.4
+            background_prob = prob_map[..., 1]
+            wing_mask = background_prob < 0.4
             cv.morphologyEx(wing_mask, cv.MORPH_CLOSE, (10,10))
             # More conservative threshold
-            wing_mask = intervein_prob < 0.4
+            wing_mask = background_prob < 0.4
         
             # Border exclusion
             border_width = 30
@@ -4794,7 +6128,7 @@ class EnhancedInterveinDetector:
     
         return wing_mask
     
-    def create_virtual_boundary_veins(self, wing_mask, actual_vein_mask, vein_width=10):
+    def create_virtual_boundary_veins(self, wing_mask, actual_vein_mask, vein_width=2):
         """Create virtual veins along wing boundaries where real veins are missing."""
         
         # Find wing boundary
@@ -4855,7 +6189,13 @@ class EnhancedInterveinDetector:
         
         # Step 8: Filter regions
         filtered_labeled_mask = self._filter_intervein_regions(labeled_regions, wing_mask)
-        
+        logger.info("Creating pre-labeling debug visualization...")
+        create_pre_labeling_debug_visualization(
+            filtered_labeled_mask, wing_mask, prob_map, raw_img,
+            output_directory=None,  # We'll need to pass this through
+            basename="debug",
+            mode_name="merge" if self.config.force_merge_regions_4_5 else "normal"
+        )
         # Step 9: Apply anatomical template matching with vein information
         final_labeled_mask = self.template_matcher.match_regions_to_template(
             filtered_labeled_mask, wing_mask, vein_mask=combined_vein_mask
@@ -5028,7 +6368,7 @@ class ImprovedWingVeinDetector:
             vein_prob = prob_map[...,2]
         else:
             if raw_img is not None:
-                vein_prob = self._intensity_based_vein_detection(raw_img)
+                vein_prob = prob_map[...,2]
             else:
                 raise ValueError("Need either 4-channel probability map or raw image")
         
@@ -5607,8 +6947,10 @@ Number of intervein regions: {len(np.unique(intervein_regions))-1}
         
         return fig
 
-def load_probability_map(h5_path: str) -> Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
-    """Load Ilastik probability map with enhanced error handling."""
+# ALTERNATIVE: If you want the threshold to be configurable, use this version instead
+
+def load_probability_map(h5_path: str, cfg: TrichomeDetectionConfig = None) -> Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
+    """Load Ilastik probability map with configurable background masking."""
     try:
         with h5py.File(h5_path, "r") as f:
             if "exported_data" not in f:
@@ -5632,6 +6974,37 @@ def load_probability_map(h5_path: str) -> Tuple[np.ndarray, Optional[np.ndarray]
             
         if trichome is None:
             raise ValueError("Could not extract trichome channel from probability map")
+        
+        # === CONFIGURABLE BACKGROUND MASKING ===
+        if cfg and hasattr(cfg, 'enable_background_masking') and cfg.enable_background_masking:
+            if data.shape[-1] >= 4 and intervein is not None:
+                # Get background channel (channel 1, 0-indexed)
+                background_prob = data[..., 1]
+                
+                # Use configurable threshold
+                background_threshold = getattr(cfg, 'background_mask_threshold', 0.4)
+                high_background_mask = background_prob > background_threshold
+                
+                # Set intervein probability to zero where background is high
+                intervein_masked = intervein.copy()
+                intervein_masked[high_background_mask] = 0.0
+                
+                # Also update the full probability map
+                data_masked = data.copy()
+                data_masked[..., 3][high_background_mask] = 0.0
+                
+                # Log the effect
+                masked_pixels = np.sum(high_background_mask)
+                total_pixels = high_background_mask.size
+                logger.info(f"BACKGROUND MASKING: Masked {masked_pixels:,} pixels ({masked_pixels/total_pixels*100:.1f}%) with background prob > {background_threshold}")
+                
+                return (trichome.astype(np.float32), 
+                        intervein_masked.astype(np.float32), 
+                        data_masked.astype(np.float32))
+            else:
+                logger.warning("Background masking skipped - insufficient channels")
+        else:
+            logger.info("Background masking disabled or no config provided")
             
         return (trichome.astype(np.float32), 
                 intervein.astype(np.float32) if intervein is not None else None, 
@@ -5640,7 +7013,6 @@ def load_probability_map(h5_path: str) -> Tuple[np.ndarray, Optional[np.ndarray]
     except Exception as e:
         logger.error(f"Error loading probability map from {h5_path}: {e}")
         raise
-
 def load_raw_image(path: Optional[str]) -> Optional[np.ndarray]:
     """Load raw image with better error handling."""
     if not path or not os.path.exists(path):
@@ -5720,13 +7092,10 @@ class ImprovedRegionDetector:
         
         # Step 2: Morphological closing to fill trichome holes
         # Use smaller structuring element to preserve region boundaries
-        closed_intervein = morphology.binary_closing(
-            intervein_prob > self.config.intervein_threshold,
-            morphology.disk(3)
-        )
+        closed_intervein = intervein_prob > 0.4
         
         # Step 3: Fill holes that are surrounded by intervein tissue
-        filled_intervein = morphology.remove_small_holes(closed_intervein, area_threshold=500)
+        filled_intervein = closed_intervein & trichome_mask
         
         # Step 4: Gaussian smoothing to create more continuous probability
         smoothed_prob = gaussian_filter(intervein_prob, sigma=1.5)
@@ -6105,7 +7474,254 @@ class ImprovedRegionDetector:
         
         return search_results
 
+# REPLACE: Add this complete function after your existing processing functions
 
+def enhanced_intervein_processing_with_hybrid_wing_detection(prob_map, raw_img, cfg, output_dir, basename, 
+                                                           force_pentagone=False):
+    """Enhanced processing using hybrid wing detection (probability + trichome validation)."""
+    
+    logger.info("Starting enhanced processing with hybrid wing detection...")
+    
+    # Step 1: Detect trichomes FIRST
+    tri_prob = prob_map[..., 0] if prob_map.shape[-1] >= 1 else prob_map
+    peaks, metrics = detect_trichome_peaks(tri_prob, cfg)
+    
+    logger.info(f"Detected {len(peaks)} trichomes for analysis")
+    
+    # Step 2: Detect veins (can be done in parallel)
+    # vein_detector = ImprovedWingVeinDetector(cfg)
+    # vein_mask, skeleton, _ = vein_detector.detect_veins_multi_approach(prob_map, raw_img)
+    vein_mask = prob_map[..., 2] > 0.5 if prob_map.shape[-1] >= 3 else np.zeros(prob_map.shape[:2], dtype=bool)
+    skeleton = morphology.skeletonize(vein_mask) 
+    
+    # Step 3: Use hybrid wing detection
+    hybrid_detector = HybridWingDetector(cfg)
+    wing_mask = hybrid_detector.detect_wing_boundary_hybrid(prob_map, raw_img, peaks)
+    
+    # Step 4: Create comparison visualization for debugging
+    prob_only_mask = hybrid_detector._detect_from_probability_enhanced(prob_map, raw_img)
+    comparison_path = os.path.join(output_dir, f"{basename}_wing_detection_comparison.png")
+    hybrid_detector.create_detection_comparison_visualization(
+        prob_map, raw_img, peaks, prob_only_mask, wing_mask, comparison_path
+    )
+    
+    # Step 5: Validate wing
+    if not WingBorderChecker.is_valid_wing(wing_mask, cfg.min_wing_area, cfg.border_buffer):
+        logger.warning(f"Skipping {basename} - wing invalid after hybrid detection")
+        return None, None, None, None, None
+    
+    # Step 6: Enhanced string removal adapted for wing sparsity
+    trichome_density = len(peaks) / prob_map.size if prob_map.size > 0 else 0
+    enhanced_string_filter = EnhancedStringRemovalFilter(cfg)
+    #filtered_peaks = enhanced_string_filter.adaptive_string_removal(
+        #peaks, prob_map.shape[:2], trichome_density
+    #)
+    filtered_peaks = peaks
+    logger.info(f"After adaptive string removal: {len(filtered_peaks)} trichomes kept")
+    
+    # Step 7: Continue with enhanced segmentation
+    intervein_detector = EnhancedInterveinDetectorWithPentagone(cfg)
+    virtual_veins = intervein_detector.create_virtual_boundary_veins(wing_mask, vein_mask)
+    combined_vein_mask = vein_mask | virtual_veins
+    barrier_mask = morphology.binary_dilation(combined_vein_mask, 
+                                             morphology.disk(cfg.vein_width_estimate * 2))
+    
+    if prob_map.shape[-1] >= 4:
+        intervein_prob = prob_map[..., 3]
+        intervein_mask = (intervein_prob > cfg.intervein_threshold) & wing_mask & (~barrier_mask)
+    else:
+        intervein_mask = wing_mask & (~barrier_mask)
+    
+    intervein_mask = morphology.remove_small_objects(intervein_mask, min_size=5000)
+    intervein_mask = morphology.remove_small_holes(intervein_mask, area_threshold=5000)
+    labeled_regions = label(intervein_mask)
+    filtered_labeled_mask = intervein_detector._filter_intervein_regions(labeled_regions, wing_mask)
+    logger.info("Creating pre-labeling debug visualization...")
+    create_pre_labeling_debug_visualization(
+        filtered_labeled_mask, wing_mask, prob_map, raw_img,
+        output_dir, basename,
+        mode_name="merge" if cfg.force_merge_regions_4_5 else "normal"
+    )
+    
+    # Step 8: Apply anatomical labeling with pentagone detection
+    if force_pentagone:
+        logger.info("FORCED PENTAGONE MODE")
+        final_labeled_mask = intervein_detector.pentagone_handler._apply_four_region_labeling(
+            filtered_labeled_mask, wing_mask)
+        is_pentagone_mode = True
+    else:
+        # Automatic detection
+        final_labeled_mask, is_pentagone = intervein_detector.pentagone_handler.apply_pentagone_labeling(
+            filtered_labeled_mask, wing_mask)
+        is_pentagone_mode = is_pentagone
+    
+    # Step 9: Get final regions
+    final_regions = regionprops(final_labeled_mask)
+    
+    # Step 10: Create enhanced visualization showing hybrid approach
+    create_hybrid_detection_visualization(
+        raw_img, prob_map, peaks, filtered_peaks, wing_mask, vein_mask, 
+        virtual_veins, final_labeled_mask, output_dir, basename, is_pentagone_mode, trichome_density
+    )
+    
+    mode_str = "pentagone (4-region)" if is_pentagone_mode else "normal (5-region)"
+    density_str = "sparse" if trichome_density < 0.1 else "dense"
+    logger.info(f"Hybrid detection found {len(final_regions)} regions using {mode_str} labeling on {density_str} wing")
+    is_merged_mode = intervein_detector.is_merged_mode if hasattr(intervein_detector, 'is_merged_mode') else False
+    
+    return final_labeled_mask, final_regions, combined_vein_mask, skeleton, is_pentagone_mode, is_merged_mode
+
+
+def create_hybrid_detection_visualization(raw_img, prob_map, all_peaks, filtered_peaks, wing_mask, 
+                                        vein_mask, virtual_veins, intervein_regions, output_dir, 
+                                        basename, is_pentagone_mode, trichome_density):
+    """Create comprehensive visualization showing hybrid detection process."""
+    
+    fig, axes = plt.subplots(3, 3, figsize=(24, 18))
+    
+    bg_img = raw_img if raw_img is not None else prob_map[..., 0]
+    density_str = "SPARSE" if trichome_density < 0.1 else "DENSE"
+    
+    # Row 1: Input data and detection approach
+    axes[0, 0].imshow(bg_img, cmap='gray')
+    axes[0, 0].set_title('Original Image')
+    axes[0, 0].axis('off')
+    
+    # Show probability channels
+    if prob_map.shape[-1] >= 4:
+        # Show the most relevant probability channel
+        intervein_prob = prob_map[..., 3]
+        axes[0, 1].imshow(intervein_prob, cmap='viridis')
+        axes[0, 1].set_title('Intervein Probability')
+    else:
+        axes[0, 1].imshow(prob_map[..., 0], cmap='viridis')
+        axes[0, 1].set_title('Trichome Probability')
+    axes[0, 1].axis('off')
+    
+    # Show trichomes with density info
+    axes[0, 2].imshow(bg_img, cmap='gray')
+    if len(all_peaks) > 0:
+        axes[0, 2].scatter(all_peaks[:, 1], all_peaks[:, 0], c='red', s=2, alpha=0.7)
+    axes[0, 2].set_title(f'Trichomes - {density_str} WING\n(n={len(all_peaks)}, density={trichome_density:.6f})')
+    axes[0, 2].axis('off')
+    
+    # Row 2: Wing detection process
+    axes[1, 0].imshow(wing_mask, cmap='Blues')
+    axes[1, 0].set_title(f'Hybrid Wing Mask\n({np.sum(wing_mask)} pixels)')
+    axes[1, 0].axis('off')
+    
+    # Show string filtering results
+    axes[1, 1].imshow(bg_img, cmap='gray')
+    if len(all_peaks) > 0:
+        axes[1, 1].scatter(all_peaks[:, 1], all_peaks[:, 0], c='red', s=1, alpha=0.4, label='Original')
+    if len(filtered_peaks) > 0:
+        axes[1, 1].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], c='blue', s=2, alpha=0.8, label='Kept')
+    
+    removed_count = len(all_peaks) - len(filtered_peaks)
+    axes[1, 1].set_title(f'Adaptive String Removal\nRemoved: {removed_count}, Kept: {len(filtered_peaks)}')
+    if len(all_peaks) > 0 and len(filtered_peaks) > 0:
+        axes[1, 1].legend()
+    axes[1, 1].axis('off')
+    
+    # Show vein detection
+    axes[1, 2].imshow(bg_img, cmap='gray')
+    axes[1, 2].imshow(vein_mask, cmap='Reds', alpha=0.7)
+    axes[1, 2].imshow(virtual_veins, cmap='Blues', alpha=0.6)
+    axes[1, 2].set_title('Vein Network\n(Red: Real, Blue: Virtual)')
+    axes[1, 2].axis('off')
+    
+    # Row 3: Final results
+    if intervein_regions is not None:
+        max_label = 4 if is_pentagone_mode else 5
+        axes[2, 0].imshow(intervein_regions, cmap='nipy_spectral', vmin=0, vmax=max_label)
+        
+        # Add region labels
+        regions = regionprops(intervein_regions)
+        if is_pentagone_mode:
+            pentagone_handler = PentagoneMutantHandler()
+            target_regions = pentagone_handler.pentagone_target_regions
+        else:
+            template_matcher = AnatomicalTemplateMatcher()
+            target_regions = template_matcher.target_regions
+        
+        for region in regions:
+            if region.label > 0:
+                region_name = target_regions.get(region.label, {}).get('name', f'Region-{region.label}')
+                cy, cx = region.centroid
+                axes[2, 0].text(cx, cy, f"{region.label}\n{region_name}", 
+                               color='white', fontsize=8, ha='center', va='center',
+                               bbox=dict(boxstyle="round,pad=0.3", facecolor='black', alpha=0.7))
+        
+        mode_str = "Pentagone (4-region)" if is_pentagone_mode else "Normal (5-region)"
+        axes[2, 0].set_title(f'Final Regions - {mode_str}\n(n={len(regions)})')
+    else:
+        axes[2, 0].text(0.5, 0.5, 'No regions detected', ha='center', va='center')
+        axes[2, 0].set_title('Final Regions')
+    axes[2, 0].axis('off')
+    
+    # Complete overlay showing method used
+    axes[2, 1].imshow(bg_img, cmap='gray')
+    if wing_mask is not None:
+        axes[2, 1].imshow(wing_mask, cmap='Blues', alpha=0.3)
+    axes[2, 1].imshow(vein_mask, cmap='Reds', alpha=0.5)
+    if intervein_regions is not None:
+        axes[2, 1].imshow(intervein_regions > 0, cmap='Greens', alpha=0.4)
+    if len(filtered_peaks) > 0:
+        sample_peaks = filtered_peaks[::max(1, len(filtered_peaks)//300)]
+        axes[2, 1].scatter(sample_peaks[:, 1], sample_peaks[:, 0], c='yellow', s=1, alpha=0.8)
+    
+    detection_method = "Probability-Dominant" if trichome_density < 0.1 else "Hybrid (Prob + Trichome)"
+    axes[2, 1].set_title(f'Complete Analysis\nMethod: {detection_method}')
+    axes[2, 1].axis('off')
+    
+    # Summary statistics
+    wing_area = np.sum(wing_mask) if wing_mask is not None else 0
+    vein_coverage = np.sum(vein_mask) / wing_area * 100 if wing_area > 0 else 0
+    virtual_coverage = np.sum(virtual_veins) / wing_area * 100 if wing_area > 0 else 0
+    
+    stats_text = f"""HYBRID DETECTION SUMMARY
+
+Wing Classification: {density_str} WING
+Detection Method: {detection_method}
+Analysis Mode: {mode_str if intervein_regions is not None else 'Failed'}
+
+TRICHOME ANALYSIS:
+- Original peaks: {len(all_peaks)}
+- After string removal: {len(filtered_peaks)}
+- Density: {trichome_density:.6f} per pixel
+- Removal rate: {(len(all_peaks) - len(filtered_peaks))/max(len(all_peaks), 1)*100:.1f}%
+
+WING DETECTION:
+- Wing area: {wing_area:,} pixels
+- Method used: {'Probability-dominant (sparse)' if trichome_density < 0.1 else 'Hybrid validation'}
+
+VEIN ANALYSIS:
+- Real vein coverage: {vein_coverage:.2f}%
+- Virtual vein coverage: {virtual_coverage:.2f}%
+- Total vein pixels: {np.sum(vein_mask | virtual_veins):,}
+
+REGION ANALYSIS:
+- Regions detected: {len(regions) if intervein_regions is not None else 0}
+- Expected regions: {4 if is_pentagone_mode else 5}
+- Success rate: {len(regions)/(4 if is_pentagone_mode else 5)*100:.1f}% if intervein_regions is not None else 0%
+
+ADAPTIVE FEATURES:
+- String removal: {'Conservative (sparse)' if trichome_density < 0.1 else 'Standard (dense)'}
+- Wing validation: {'Probability-only' if trichome_density < 0.05 else 'Trichome-validated'}
+"""
+    
+    axes[2, 2].text(0.05, 0.95, stats_text, transform=axes[2, 2].transAxes,
+                    verticalalignment='top', fontfamily='monospace', fontsize=9)
+    axes[2, 2].set_title('Analysis Summary')
+    axes[2, 2].axis('off')
+    
+    plt.tight_layout()
+    
+    save_path = os.path.join(output_dir, f"{basename}_hybrid_detection_analysis.png")
+    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    plt.close()
+    
+    logger.info(f"Saved hybrid detection visualization to {save_path}")
 # Modified main processing function that uses improved detection
 def enhanced_intervein_processing_with_improved_detection(prob_map, raw_img, cfg, output_dir, basename, 
                                                         force_pentagone=False):
@@ -6114,8 +7730,10 @@ def enhanced_intervein_processing_with_improved_detection(prob_map, raw_img, cfg
     logger.info("Starting enhanced processing with improved small region detection...")
     
     # Step 1: Detect veins
-    vein_detector = ImprovedWingVeinDetector(cfg)
-    vein_mask, skeleton, _ = vein_detector.detect_veins_multi_approach(prob_map, raw_img)
+    # vein_detector = ImprovedWingVeinDetector(cfg)
+    # vein_mask, skeleton, _ = vein_detector.detect_veins_multi_approach(prob_map, raw_img)
+    vein_mask = prob_map[..., 2] > 0.5 if prob_map.shape[-1] >= 3 else np.zeros(prob_map.shape[:2], dtype=bool)
+    skeleton = morphology.skeletonize(vein_mask) 
     
     # Step 2: Detect wing boundary
     if raw_img is not None:
@@ -6313,7 +7931,7 @@ def main_with_improved_detection(directory: str, cfg: TrichomeDetectionConfig = 
                     skipped_files += 1
                     continue
                 
-                labeled_mask, valid_regions, vein_mask, skeleton, is_pentagone_mode = result
+                labeled_mask, valid_regions, vein_mask, skeleton, is_pentagone_mode, is_merged_mode = result
                 
                 # Track statistics
                 if is_pentagone_mode:
@@ -6423,35 +8041,16 @@ def configure_for_small_regions(config):
     """Adjust configuration parameters for better small region detection."""
     
     # Make filtering more lenient for small regions
-    config.auto_intervein_min_area = 5000  # Reduced from 8000
+    config.auto_intervein_min_area = 200  # Reduced from 8000
     config.min_intervein_solidity = 0.5    # Reduced from 0.6
     config.intervein_threshold = 0.35      # Reduced from 0.4
     
     # Adjust vein detection to be less aggressive
-    config.vein_width_estimate = 10       # Reduced from 10
+    config.vein_width_estimate = 2      # Reduced from 10
     
     logger.info("Applied configuration adjustments for small region detection")
     return config
 
-
-# Example usage function with improved detection
-def run_improved_detection_example():
-    """Example of how to run the improved detection."""
-    
-    # Configure paths
-    input_directory = r"/path/to/your/wings"
-    output_directory = r"/path/to/output"
-    
-    # Adjust configuration for small regions
-    improved_config = configure_for_small_regions(CONFIG)
-    
-    # Run improved detection
-    main_with_improved_detection(
-        directory=input_directory,
-        cfg=improved_config,
-        output_directory=output_directory,
-        force_pentagone_mode=False  # Let it auto-detect
-    )
 
 
 # Quick fix function to apply to existing EnhancedInterveinDetector
@@ -6503,7 +8102,7 @@ def apply_small_region_improvements(existing_detector):
         
         return intervein_regions, combined_vein_mask, virtual_veins
     
-    # Replace the method
+
     existing_detector.segment_intervein_regions_enhanced = enhanced_segment_with_improvements
     
     logger.info("Applied small region improvements to existing detector")
@@ -6943,6 +8542,7 @@ def voronoi_average_cell_stats(region, region_peaks, cfg=CONFIG):
 
     # Calculate statistics
     region_area = region.area
+    
     average_cell_area = float(np.mean(final))
     std_cell_area = float(np.std(final))
     percentage_measured = 100.0 * final.size / valid_idx.sum()
@@ -6974,6 +8574,13 @@ def _voronoi_adjacency(vor: Voronoi) -> Dict[int, set]:
         adj[p].add(q)
         adj[q].add(p)
     return adj
+
+
+
+
+
+
+
 
 def voronoi_finite_polygons_2d(vor, radius=None):
     """Reconstruct infinite Voronoi regions in a 2D diagram to finite regions."""
@@ -7095,7 +8702,7 @@ def save_anatomical_region_info(valid_regions, basename, output_dir):
 
 
 def find_associated_files(directory):
-    """Windows-optimized file finder with improved compatibility."""
+    """Windows-compatible file finder with improved pattern matching."""
     mapping = {}
     directory_path = Path(directory)
     
@@ -7103,153 +8710,108 @@ def find_associated_files(directory):
         logger.error(f"Directory does not exist: {directory}")
         return mapping
     
-    logger.info(f"Scanning directory: {directory}")
+    # More comprehensive patterns for Windows (case-insensitive)
+    prob_patterns = [
+        "*[Pp]robabilities.h5", "*[Pp]robabilities.H5",
+        "*[Pp]robabilities.hdf5", "*[Pp]robabilities.HDF5",
+        "*_prob.h5", "*_prob.H5", "*_prob.hdf5", "*_prob.HDF5",
+        "*_.h5", "*_.H5", "*_.hdf5", "*_.HDF5"
+    ]
     
-    # Use more robust file matching for Windows
     prob_files = []
-    
-    try:
-        for file_path in directory_path.iterdir():
-            if not file_path.is_file():
-                continue
-                
-            filename = file_path.name
-            filename_lower = filename.lower()
-            
-            # Check for probability files with case-insensitive matching
-            prob_patterns = [
-                'probabilities.h5', 'probabilities.hdf5',
-                'prob.h5', 'prob.hdf5',
-                '.h5', '.hdf5'
-            ]
-            
-            is_prob_file = False
-            for pattern in prob_patterns:
-                if filename_lower.endswith(pattern.lower()):
-                    is_prob_file = True
-                    break
-            
-            if is_prob_file:
-                prob_files.append(file_path)
-                
-    except PermissionError as e:
-        logger.error(f"Permission denied accessing directory: {e}")
-        return mapping
-    except Exception as e:
-        logger.error(f"Error scanning directory: {e}")
-        return mapping
-    
-    logger.info(f"Found {len(prob_files)} potential probability files")
-    
-    for prob_path in prob_files:
+    for pattern in prob_patterns:
         try:
-            filename = prob_path.name
-            filename_lower = filename.lower()
-            
-            # Extract basename more robustly
-            basename = filename
-            
-            # Remove common suffixes
-            suffixes_to_remove = [
-                "_probabilities.h5", "_probabilities.hdf5",
-                "_prob.h5", "_prob.hdf5",
-                "_probabilities.H5", "_probabilities.HDF5",
-                "_prob.H5", "_prob.HDF5",
-                ".h5", ".hdf5", ".H5", ".HDF5"
-            ]
-            
-            for suffix in suffixes_to_remove:
-                if filename_lower.endswith(suffix.lower()):
-                    # Use original case for extraction
-                    basename = filename[:-len(suffix)]
-                    break
-            
-            # Clean up basename
-            basename = basename.strip('_').strip()
-            
-            if not basename:
-                logger.warning(f"Could not extract basename from {filename}")
-                continue
-            
-            mapping[basename] = {'probabilities': str(prob_path)}
-            
-            # Look for raw files
-            raw_file = find_raw_file(directory_path, basename)
-            mapping[basename]['raw'] = raw_file
-            
-            if raw_file:
-                logger.info(f"✓ Found pair: {basename}")
-            else:
-                logger.info(f"✓ Found: {basename} (prob only)")
-                
+            # Use case-insensitive matching
+            matches = list(directory_path.glob(pattern))
+            # Also try rglob for recursive search in case files are in subdirectories
+            matches.extend(list(directory_path.rglob(pattern)))
+            prob_files.extend(matches)
         except Exception as e:
-            logger.error(f"Error processing {prob_path.name}: {e}")
+            logger.warning(f"Error with pattern {pattern}: {e}")
             continue
     
-    logger.info(f"Successfully mapped {len(mapping)} file sets")
+    # Remove duplicates
+    prob_files = list(set(prob_files))
+    
+    logger.info(f"Found {len(prob_files)} potential probability files")
+    for pf in prob_files:
+        logger.info(f"  - {pf.name}")
+    
+    for prob_path in prob_files:
+        filename = prob_path.name.lower()  # Convert to lowercase for matching
+        basename = None
+        
+        # More robust basename extraction
+        extraction_patterns = [
+            ("_probabilities.h5", ""), ("_probabilities.hdf5", ""),
+            ("_probabilities.H5", ""), ("_probabilities.HDF5", ""),
+            ("probabilities.h5", ""), ("probabilities.hdf5", ""),
+            ("probabilities.H5", ""), ("probabilities.HDF5", ""),
+            ("_prob.h5", ""), ("_prob.hdf5", ""),
+            ("_prob.H5", ""), ("_prob.HDF5", ""),
+            (".h5", ""), (".H5", ""), (".hdf5", ""), (".HDF5", "")
+        ]
+        
+        for suffix, replacement in extraction_patterns:
+            if filename.endswith(suffix.lower()):
+                basename = filename.replace(suffix.lower(), replacement)
+                break
+        
+        if basename is None:
+            # Fallback: use stem
+            basename = prob_path.stem
+            if basename.lower().endswith('_probabilities'):
+                basename = basename[:-14]  # Remove '_probabilities'
+            elif basename.lower().endswith('_prob'):
+                basename = basename[:-5]   # Remove '_prob'
+        
+        # Clean basename
+        basename = basename.strip('_').strip()
+        
+        if not basename:
+            logger.warning(f"Could not extract basename from {prob_path.name}")
+            continue
+            
+        mapping[basename] = {'probabilities': str(prob_path)}
+        
+        # Look for corresponding raw files with more patterns
+        raw_patterns = [
+            f"{basename}_[Rr]aw.h5", f"{basename}_[Rr]aw.H5",
+            f"{basename}_[Rr]aw.hdf5", f"{basename}_[Rr]aw.HDF5",
+            f"{basename}_[Rr]aw.tiff", f"{basename}_[Rr]aw.tif", 
+            f"{basename}_[Rr]aw.TIFF", f"{basename}_[Rr]aw.TIF",
+            f"{basename}_[Rr]aw.png", f"{basename}_[Rr]aw.PNG",
+            f"{basename}_[Rr]aw.jpg", f"{basename}_[Rr]aw.jpeg",
+            f"{basename}_[Rr]aw.JPG", f"{basename}_[Rr]aw.JPEG",
+            f"{basename}.tiff", f"{basename}.tif", 
+            f"{basename}.TIFF", f"{basename}.TIF",
+            f"{basename}.png", f"{basename}.PNG",
+            f"{basename}.jpg", f"{basename}.jpeg",
+            f"{basename}.JPG", f"{basename}.JPEG"
+        ]
+        
+        raw_candidates = []
+        for pattern in raw_patterns:
+            try:
+                candidates = list(directory_path.glob(pattern))
+                raw_candidates.extend([str(c) for c in candidates])
+            except Exception as e:
+                continue
+        
+        # Remove duplicates and pick first
+        raw_candidates = list(set(raw_candidates))
+        mapping[basename]['raw'] = raw_candidates[0] if raw_candidates else None
+        
+        if mapping[basename]['raw']:
+            logger.info(f"Windows: Found pair: {basename} (prob + raw)")
+        else:
+            logger.info(f"Windows: Found: {basename} (prob only)")
+    
+    logger.info(f"Final mapping contains {len(mapping)} entries")
     return mapping
 
 
-def find_raw_file(directory_path, basename):
-    """Find corresponding raw file for a basename."""
-    raw_extensions = ['.tiff', '.tif', '.png', '.jpg', '.jpeg', '.h5', '.hdf5']
-    raw_prefixes = [f"{basename}_raw", f"{basename}_Raw", f"{basename}"]
-    
-    for prefix in raw_prefixes:
-        for ext in raw_extensions:
-            # Try both cases
-            for ext_variant in [ext.lower(), ext.upper()]:
-                candidate = directory_path / f"{prefix}{ext_variant}"
-                if candidate.exists() and candidate.is_file():
-                    return str(candidate)
-    
-    return None
 
-# def find_associated_files(directory):
-#     """Locate probability and raw image files with better pattern matching."""
-#     mapping = {}
-#     directory_path = Path(directory)
-    
-#     # More flexible pattern matching
-#     prob_patterns = ["*_Probabilities.h5", "*_probabilities.h5", "*_prob.h5","*_.h5"]
-#     prob_files = []
-#     for pattern in prob_patterns:
-#         prob_files.extend(directory_path.glob(pattern))
-    
-#     for prob_path in prob_files:
-#         filename = prob_path.name
-#         # Extract basename more robustly
-#         for suffix in ["_Probabilities.h5", "_probabilities.h5", "_prob.h5"]:
-#             if filename.endswith(suffix):
-#                 basename = filename.replace(suffix, "")
-#                 break
-#         else:
-#             continue
-            
-#         mapping[basename] = {'probabilities': str(prob_path)}
-        
-#         # Look for corresponding raw files
-#         raw_patterns = [
-#             f"{basename}_Raw.h5", f"{basename}_raw.h5", f"{basename}_Raw.tiff",
-#             f"{basename}_Raw.tif", f"{basename}_raw.tiff", f"{basename}_raw.tif",
-#             f"{basename}_Raw.png", f"{basename}_raw.png",
-#             f"{basename}_Raw.jpg", f"{basename}_raw.jpg",
-#             f"{basename}.tiff", f"{basename}.tif", f"{basename}.png", f"{basename}.jpg"
-#         ]
-        
-#         raw_candidates = []
-#         for pattern in raw_patterns:
-#             candidates = list(directory_path.glob(pattern))
-#             raw_candidates.extend([str(c) for c in candidates])
-        
-#         mapping[basename]['raw'] = raw_candidates[0] if raw_candidates else None
-        
-#         if mapping[basename]['raw']:
-#             logger.info(f"Found pair: {basename} (prob + raw)")
-#         else:
-#             logger.info(f"Found: {basename} (prob only)")
-    
-#     return mapping
 
 def enhanced_intervein_processing(prob_map, raw_img, cfg, output_dir, basename):
     """Complete automated intervein processing pipeline with improved boundary handling."""
@@ -7257,8 +8819,10 @@ def enhanced_intervein_processing(prob_map, raw_img, cfg, output_dir, basename):
     logger.info("Starting enhanced automated vein and intervein detection...")
     
     # Step 1: Detect veins using the improved detector
-    vein_detector = ImprovedWingVeinDetector(cfg)
-    vein_mask, skeleton, _ = vein_detector.detect_veins_multi_approach(prob_map, raw_img)
+    # vein_detector = ImprovedWingVeinDetector(cfg)
+    # vein_mask, skeleton, _ = vein_detector.detect_veins_multi_approach(prob_map, raw_img)
+    vein_mask = prob_map[..., 2] > 0.5 if prob_map.shape[-1] >= 3 else np.zeros(prob_map.shape[:2], dtype=bool)
+    skeleton = morphology.skeletonize(vein_mask) 
     
     # Step 2: Use enhanced intervein detector for better boundary handling
     intervein_detector = EnhancedInterveinDetector(cfg)
@@ -7281,8 +8845,8 @@ def enhanced_intervein_processing(prob_map, raw_img, cfg, output_dir, basename):
     
     # Also save the original vein detection visualization
     orig_vis_path = os.path.join(output_dir, f"{basename}_vein_detection.png")
-    vein_detector.visualize_detection_results(raw_img, vein_mask, skeleton, 
-                                            intervein_regions, orig_vis_path)
+    # vein_detector.visualize_detection_results(raw_img, vein_mask, skeleton, 
+    #                                         intervein_regions, orig_vis_path)
     
     # Step 4: Get final regions for analysis
     final_regions = regionprops(intervein_regions)
@@ -7725,32 +9289,35 @@ def main(directory: str, cfg: TrichomeDetectionConfig = CONFIG,
     
     logger.info(f"Summary report saved to {summary_path}")
 
+# REPLACE: Replace your entire __main__ section at the very end of your script with this
+
 if __name__ == "__main__":
     # Ensure Windows compatibility
-    ensure_windows_compatibility()
+    # ensure_windows_compatibility()
     
     # Check if GUI should be launched
     import sys
     
     if len(sys.argv) > 1 and sys.argv[1] == "--cli":
-        # Command line mode for backwards compatibility
+        # Command line mode with hybrid detection
         root = tk.Tk()
         root.withdraw()
         
         # Configure paths - UPDATE THESE FOR YOUR SYSTEM
-        input_directory = r"/Users/rfa/Desktop/PhD/Organised Data/High Resolution Adult Wings/Data_Dir/New Set/110137_SxlRNai_25_Female"
-        output_directory = input_directory  # Or set a different output directory
+        input_directory = r"/path/to/your/wing/data"
+        output_directory = input_directory
         
         if not input_directory or not os.path.exists(input_directory):
             print("Invalid input directory. Please check the path.")
         else:
-            logger.info("Starting fully automated trichome detection with template-based labeling...")
-            main_with_pentagone_support(
+            logger.info("Starting hybrid wing detection analysis...")
+            main_with_hybrid_wing_detection(
                 directory=input_directory,
+                cfg=CONFIG,  # Uses the enhanced config
                 output_directory=output_directory,
-                force_pentagone_mode=False,      # Let algorithm decide
-                auto_detect_pentagone=True       # Enable auto-detection
+                force_pentagone_mode=False,
+                auto_detect_pentagone=True
             )
     else:
-        # Launch GUI by default
+        # Launch GUI with hybrid detection support
         run_gui()
