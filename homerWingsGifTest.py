@@ -10,48 +10,53 @@ HomerWings for public beta. IJFM!
 
 from __future__ import annotations
 
-import os
+import base64
 import csv
-import math
 import glob
-import sys
-import time
+import json
 import logging
-from dataclasses import dataclass, field
-from typing import Tuple, List, Dict, Optional, Union
+import math
+import os
+import queue
+import sys
+import threading
+import time
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from scipy.spatial.distance import pdist, squareform
-import numpy as np
+from typing import Dict, List, Optional, Tuple, Union
+
 import h5py
 import imageio
+import matplotlib
 import matplotlib.pyplot as plt
-from scipy.spatial import ConvexHull, Voronoi, distance_matrix
+import numpy as np
+import tkinter as tk
+from PIL import Image, ImageTk
+from scipy import ndimage
 from scipy.ndimage import gaussian_filter, maximum_filter
 from scipy.optimize import linear_sum_assignment
+from scipy.spatial import ConvexHull, Voronoi, distance_matrix
+from scipy.spatial.distance import pdist, squareform
 from shapely.geometry import Polygon
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
-import threading
-import queue
-import json
-import base64
-from pathlib import Path
-from dataclasses import asdict
-import time
-from skimage import exposure, morphology, filters, feature, measure, segmentation
-from skimage.morphology import white_tophat, disk, remove_small_objects, binary_dilation, binary_erosion, skeletonize
-from skimage.filters import threshold_local, gaussian, frangi, sato
-from skimage.feature import peak_local_max
-from skimage.segmentation import watershed
-from skimage.measure import label, regionprops, find_contours
-from skimage.morphology import h_maxima, remove_small_holes
 from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
-from scipy import ndimage
-from PIL import Image, ImageTk
-import tkinter as tk
-from tkinter import filedialog, messagebox
-import matplotlib
+from skimage import exposure, feature, filters, measure, morphology, segmentation
+from skimage.feature import peak_local_max
+from skimage.filters import frangi, gaussian, sato, threshold_local
+from skimage.measure import find_contours, label, regionprops
+from skimage.morphology import (
+    binary_dilation,
+    binary_erosion,
+    disk,
+    h_maxima,
+    remove_small_holes,
+    remove_small_objects,
+    skeletonize,
+    white_tophat,
+)
+from skimage.segmentation import watershed
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+
 import drosophila_gif
 matplotlib.use('Agg')
 # Setup logging
