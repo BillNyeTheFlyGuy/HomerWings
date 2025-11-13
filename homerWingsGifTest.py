@@ -378,9 +378,14 @@ class HybridWingDetector:
         }
 
         total_weight = 0.0
-        for name, mask in candidate_masks:
+        for candidate in candidate_masks:
+            if len(candidate) == 3:
+                name, mask, context = candidate
+            else:
+                name, mask = candidate
+                context = None
             base_weight = base_weights.get(name, 0.1)
-            adjusted_weight = self._evaluate_candidate_mask(name, mask, base_weight)
+            adjusted_weight = self._evaluate_candidate_mask(name, mask, base_weight, context)
 
             if adjusted_weight <= 0:
                 logger.debug("Skipping %s mask due to negligible reliability", name)
@@ -391,21 +396,47 @@ class HybridWingDetector:
 
         if total_weight <= 0:
             logger.warning("All probability masks failed reliability checks; returning empty mask")
-            return np.zeros(shape, dtype=bool)
+            empty_mask = np.zeros(shape, dtype=bool)
+            return ProbabilityConsensus(empty_mask, vote_map, 0.45)
 
         # Normalize votes
         vote_map /= total_weight
 
         # Threshold voting - require at least 45% agreement from reliable sources
-        consensus_mask = vote_map > 0.45
-        
+        base_threshold = 0.45
+        consensus_mask = vote_map > base_threshold
+
+        nominal_cov, min_cov, max_cov = self._expected_wing_coverage(shape)
+        actual_cov = float(np.mean(consensus_mask))
+        adjusted_threshold = base_threshold
+
+        if actual_cov < min_cov * 0.9:
+            adjusted_threshold = max(0.32, base_threshold - 0.1)
+        elif actual_cov < nominal_cov * 0.7:
+            adjusted_threshold = max(0.35, base_threshold - 0.06)
+        elif actual_cov > max_cov * 1.1:
+            adjusted_threshold = min(0.65, base_threshold + 0.08)
+        elif actual_cov > nominal_cov * 1.6:
+            adjusted_threshold = min(0.6, base_threshold + 0.05)
+
+        if adjusted_threshold != base_threshold:
+            logger.info(
+                "Adjusting consensus threshold from %.2f to %.2f (coverage %.3f, target %.3f-%.3f)",
+                base_threshold,
+                adjusted_threshold,
+                actual_cov,
+                min_cov,
+                max_cov,
+            )
+            consensus_mask = vote_map > adjusted_threshold
+
         # Clean up the consensus mask
         consensus_mask = self._clean_probability_mask(consensus_mask)
 
         logger.info(f"Probability consensus: {np.sum(consensus_mask)} pixels")
-        return consensus_mask
+        return ProbabilityConsensus(consensus_mask, vote_map, adjusted_threshold)
 
-    def _evaluate_candidate_mask(self, name, mask, base_weight):
+    def _evaluate_candidate_mask(self, name, mask, base_weight, context=None):
         """Scale the base weight of a probability mask according to quality metrics."""
 
         if mask is None or not np.any(mask):
@@ -442,7 +473,9 @@ class HybridWingDetector:
         if elongated < 0.5:
             reliability *= 0.85
 
-        reliability = np.clip(reliability, 0.05, 1.25)
+        reliability *= self._contextual_confidence(name, context)
+
+        reliability = np.clip(reliability, 0.05, 1.4)
 
         logger.debug(
             "Mask %s metrics: coverage=%.3f, largest=%d, edge=%.3f, ecc=%.3f, weight=%.3f",
@@ -455,6 +488,67 @@ class HybridWingDetector:
         )
 
         return base_weight * reliability
+
+    def _contextual_confidence(self, name, context):
+        if not context:
+            return 1.0
+
+        confidence = 1.0
+
+        mean_prob = context.get('mean_probability')
+        if mean_prob is not None:
+            expected_range = context.get('expected_range', (0.25, 0.85))
+            lower, upper = expected_range
+            if upper > lower:
+                normalized = np.clip((mean_prob - lower) / (upper - lower), 0.0, 1.0)
+            else:
+                normalized = np.clip(mean_prob, 0.0, 1.0)
+            confidence *= 0.4 + 0.8 * normalized
+
+        std_prob = context.get('std_probability')
+        if std_prob is not None:
+            expected_span = context.get('expected_span', 0.5)
+            span = max(expected_span, 1e-3)
+            normalized_std = std_prob / span
+            confidence *= 1.0 / (1.0 + 0.9 * normalized_std)
+
+        mean_background = context.get('mean_background')
+        if mean_background is not None:
+            confidence *= 1.0 - 0.6 * np.clip(mean_background, 0.0, 1.0)
+
+        support_fraction = context.get('support_fraction')
+        if support_fraction is not None:
+            confidence *= 0.6 + 0.6 * np.clip(support_fraction, 0.0, 1.5)
+
+        mean_intensity = context.get('mean_intensity')
+        if mean_intensity is not None:
+            deviation = abs(mean_intensity - 0.5)
+            confidence *= float(np.clip(math.exp(-deviation / 0.18), 0.5, 1.25))
+
+        intensity_iqr = context.get('intensity_iqr')
+        if intensity_iqr is not None:
+            confidence *= float(np.clip(0.7 + intensity_iqr, 0.7, 1.3))
+
+        if name == 'combined':
+            confidence *= 1.05
+        elif name == 'intensity':
+            confidence *= 0.9
+
+        return float(np.clip(confidence, 0.3, 1.4))
+
+    def _expected_wing_coverage(self, shape):
+        total_pixels = max(float(shape[0] * shape[1]), 1.0)
+        min_cov = getattr(self.config, 'min_wing_area', 0) / total_pixels
+        min_cov = float(np.clip(min_cov, 0.02, 0.35))
+
+        max_region_area = getattr(self.config, 'max_region_area', None)
+        if max_region_area is None:
+            max_region_area = getattr(self.config, 'min_region_area', self.config.min_wing_area) * 4
+        max_cov = float(np.clip(max_region_area / total_pixels, min_cov + 0.05, 0.75))
+
+        nominal = float(np.clip((min_cov * 1.2 + max_cov * 0.8) / 2.0, min_cov, max_cov))
+
+        return nominal, min_cov, max_cov
 
     def _mask_quality_metrics(self, mask):
         """Calculate quality metrics for a candidate probability mask."""
@@ -720,17 +814,22 @@ class HybridWingDetector:
     def _create_sparse_trichome_mask(self, peaks, shape):
         """Create trichome mask optimized for sparse wings."""
         mask = np.zeros(shape, dtype=bool)
-        
-        if len(peaks) == 0:
+
+        peaks = np.asarray(peaks)
+        if peaks.size == 0:
             return mask
-        
+
+        if peaks.ndim == 1:
+            peaks = peaks.reshape(1, -1)
+
+        coords = np.asarray(peaks[:, :2], dtype=int)
+
         # Use large smoothing kernel for sparse wings
         sigma = 20  # Larger than dense wing sigma
         density_map = np.zeros(shape, dtype=np.float32)
-        
+
         # Add gaussian blobs at each trichome
-        for peak in peaks:
-            y, x = peak
+        for y, x in coords:
             radius = int(3 * sigma)
             y_min = max(0, y - radius)
             y_max = min(shape[0], y + radius + 1)
@@ -755,16 +854,21 @@ class HybridWingDetector:
     def _create_dense_trichome_mask(self, peaks, shape):
         """Create trichome mask for dense wings."""
         mask = np.zeros(shape, dtype=bool)
-        
-        if len(peaks) == 0:
+
+        peaks = np.asarray(peaks)
+        if peaks.size == 0:
             return mask
-        
+
+        if peaks.ndim == 1:
+            peaks = peaks.reshape(1, -1)
+
+        coords = np.asarray(peaks[:, :2], dtype=int)
+
         # Standard smoothing for dense wings
         sigma = 12
         density_map = np.zeros(shape, dtype=np.float32)
-        
-        for peak in peaks:
-            y, x = peak
+
+        for y, x in coords:
             radius = int(3 * sigma)
             y_min = max(0, y - radius)
             y_max = min(shape[0], y + radius + 1)
@@ -912,25 +1016,35 @@ class StringRemovalTrichomeFilter:
         
     def remove_trichome_strings(self, peaks, image_shape):
         """Remove long, thin strings of trichomes that represent bubble artifacts."""
-        
+
+        peaks = np.asarray(peaks)
+        if peaks.size == 0:
+            logger.info("Too few trichomes for string filtering")
+            return peaks
+
+        if peaks.ndim == 1:
+            peaks = peaks.reshape(1, -1)
+
         if len(peaks) < 20:
             logger.info("Too few trichomes for string filtering")
             return peaks
 
+        coords = np.asarray(peaks[:, :2], dtype=float)
+
         logger.info("Filtering strings from %d trichomes", len(peaks))
-        
+
         # Step 1: Build connectivity graph between nearby trichomes
-        adjacency_graph = self._build_trichome_graph(peaks)
-        
+        adjacency_graph = self._build_trichome_graph(coords)
+
         # Step 2: Find connected components (chains/strings)
         components = self._find_connected_components(adjacency_graph)
-        
+
         # Step 3: Identify which components are "strings" vs "blobs"
-        string_components = self._identify_string_components(peaks, components)
-        
+        string_components = self._identify_string_components(coords, components)
+
         # Step 4: Remove trichomes that belong to string components
         filtered_peaks = self._remove_string_trichomes(peaks, string_components)
-        
+
         removed_count = len(peaks) - len(filtered_peaks)
         logger.info(
             "Removed %d trichomes from %d string artifacts", removed_count, len(string_components)
@@ -939,12 +1053,17 @@ class StringRemovalTrichomeFilter:
         
         return filtered_peaks
     
-    def _build_trichome_graph(self, peaks):
+    def _build_trichome_graph(self, coords):
         """Build graph of connected trichomes based on distance."""
-        n_peaks = len(peaks)
-        
-        # Calculate pairwise distances
-        distances = squareform(pdist(peaks))
+        coords = np.asarray(coords, dtype=float)
+        if coords.ndim != 2 or coords.size == 0:
+            return np.zeros((0, 0), dtype=bool)
+
+        coords = coords[:, :2]
+        n_peaks = len(coords)
+
+        # Calculate pairwise distances using spatial coordinates only
+        distances = squareform(pdist(coords))
         
         # Create adjacency matrix
         adjacency = distances <= self.connection_distance
@@ -987,14 +1106,14 @@ class StringRemovalTrichomeFilter:
         
         return components
     
-    def _identify_string_components(self, peaks, components):
+    def _identify_string_components(self, coords, components):
         """Identify which components are long strings vs compact blobs."""
         string_components = []
-        
-        for i, component in enumerate(components):
-            component_peaks = peaks[component]
 
-            metrics = self._component_metrics(component_peaks)
+        for i, component in enumerate(components):
+            component_coords = coords[component]
+
+            metrics = self._component_metrics(component_coords)
             if metrics['count'] < self.min_string_length:
                 logger.debug(
                     "Component %d skipped (too few trichomes: %d)",
@@ -1003,7 +1122,7 @@ class StringRemovalTrichomeFilter:
                 )
                 continue  # Too short to be a problematic string
 
-            is_string = self._is_linear_string(component_peaks, metrics)
+            is_string = self._is_linear_string(component_coords, metrics)
 
             if is_string:
                 string_components.append(component)
@@ -1197,6 +1316,14 @@ class StringRemovalTrichomeFilter:
     def create_wing_mask_simple(self, filtered_peaks, image_shape):
         """Create wing mask from filtered trichomes using simple approach."""
         
+        filtered_peaks = np.asarray(filtered_peaks)
+        if filtered_peaks.size == 0:
+            logger.info("Too few filtered trichomes for wing mask generation")
+            return None
+
+        if filtered_peaks.ndim == 1:
+            filtered_peaks = filtered_peaks.reshape(1, -1)
+
         if len(filtered_peaks) < 10:
             logger.info("Too few filtered trichomes for wing mask generation")
             return None
@@ -1204,15 +1331,16 @@ class StringRemovalTrichomeFilter:
         logger.info(
             "Creating wing mask from %d filtered trichomes", len(filtered_peaks)
         )
-        
+
         # Method: Dense region growing
         density_map = np.zeros(image_shape, dtype=np.float32)
-        
+
+        coords = np.asarray(filtered_peaks[:, :2], dtype=int)
+
         # Add gaussian blob at each trichome
         sigma = 12  # Smoothing radius
-        for peak in filtered_peaks:
-            y, x = peak
-            
+        for y, x in coords:
+
             # Add gaussian contribution
             radius = int(3 * sigma)
             y_min, y_max = max(0, y-radius), min(image_shape[0], y+radius+1)
@@ -8285,14 +8413,22 @@ def _intensity_valley(proc: np.ndarray, p1: np.ndarray, p2: np.ndarray, samples:
     
     return np.min(line_intensities)
 
-def save_peak_coordinates_enhanced(peaks: np.ndarray, basename: str, output_dir: str, 
+def save_peak_coordinates_enhanced(peaks: np.ndarray, basename: str, output_dir: str,
                                  metrics: PeakDetectionMetrics, prob_map: np.ndarray) -> None:
     """Save peak coordinates with additional metadata and quality metrics."""
     output_path = os.path.join(output_dir, f"{basename}_peak_coordinates.csv")
-    
+
+    peaks = np.asarray(peaks)
+    if peaks.size == 0:
+        coord_peaks = np.empty((0, 2), dtype=int)
+    else:
+        if peaks.ndim == 1:
+            peaks = peaks.reshape(1, -1)
+        coord_peaks = np.asarray(peaks[:, :2], dtype=int)
+
     with open(output_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        
+
         # Write header with metadata
         writer.writerow(["# Trichome Peak Detection Results"])
         writer.writerow([f"# File: {basename}"])
@@ -8303,18 +8439,17 @@ def save_peak_coordinates_enhanced(peaks: np.ndarray, basename: str, output_dir:
         
         # Data header
         writer.writerow(["row", "col", "intensity", "local_max_score"])
-        
+
         # Write peak data with additional metrics
-        for peak in peaks:
-            r, c = peak
+        for r, c in coord_peaks:
             intensity = prob_map[r, c]
-            
+
             # Calculate local maximum score (how much higher than neighborhood)
             neighborhood = prob_map[max(0, r-3):r+4, max(0, c-3):c+4]
             local_max_score = intensity - np.median(neighborhood) if neighborhood.size > 1 else 0
-            
+
             writer.writerow([r, c, f"{intensity:.4f}", f"{local_max_score:.4f}"])
-    
+
     # Also save the metrics report
     metrics_path = os.path.join(output_dir, f"{basename}_detection_metrics.txt")
     with open(metrics_path, "w") as f:
@@ -8323,31 +8458,39 @@ def save_peak_coordinates_enhanced(peaks: np.ndarray, basename: str, output_dir:
     logger.info(f"Saved peak coordinates to {output_path}")
     logger.info(f"Saved detection metrics to {metrics_path}")
 
-def create_detection_visualization(prob_map: np.ndarray, peaks: np.ndarray, basename: str, 
+def create_detection_visualization(prob_map: np.ndarray, peaks: np.ndarray, basename: str,
                                  output_dir: str, raw_img: Optional[np.ndarray] = None) -> None:
     """Create comprehensive visualization of detection results."""
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    
+
     # Background image
     bg_img = raw_img if raw_img is not None else prob_map
-    
+
+    peaks = np.asarray(peaks)
+    if peaks.size == 0:
+        coord_peaks = np.empty((0, 2), dtype=int)
+    else:
+        if peaks.ndim == 1:
+            peaks = peaks.reshape(1, -1)
+        coord_peaks = np.asarray(peaks[:, :2], dtype=int)
+
     # Top-left: Original probability map
     axes[0, 0].imshow(prob_map, cmap='viridis')
     axes[0, 0].set_title('Trichome Probability Map')
     axes[0, 0].axis('off')
-    
+
     # Top-right: Detected peaks overlay
     axes[0, 1].imshow(bg_img, cmap='gray')
-    if peaks.size > 0:
-        axes[0, 1].scatter(peaks[:, 1], peaks[:, 0], c='red', s=20, alpha=0.7)
-    axes[0, 1].set_title(f'Detected Peaks (n={len(peaks)})')
+    if coord_peaks.size > 0:
+        axes[0, 1].scatter(coord_peaks[:, 1], coord_peaks[:, 0], c='red', s=20, alpha=0.7)
+    axes[0, 1].set_title(f'Detected Peaks (n={len(coord_peaks)})')
     axes[0, 1].axis('off')
-    
+
     # Bottom-left: Peak intensity histogram
-    if peaks.size > 0:
-        intensities = prob_map[peaks[:, 0], peaks[:, 1]]
+    if coord_peaks.size > 0:
+        intensities = prob_map[coord_peaks[:, 0], coord_peaks[:, 1]]
         axes[1, 0].hist(intensities, bins=30, alpha=0.7, edgecolor='black')
-        axes[1, 0].axvline(np.mean(intensities), color='red', linestyle='--', 
+        axes[1, 0].axvline(np.mean(intensities), color='red', linestyle='--',
                           label=f'Mean: {np.mean(intensities):.3f}')
         axes[1, 0].set_xlabel('Peak Intensity')
         axes[1, 0].set_ylabel('Count')
@@ -8356,26 +8499,26 @@ def create_detection_visualization(prob_map: np.ndarray, peaks: np.ndarray, base
     else:
         axes[1, 0].text(0.5, 0.5, 'No peaks detected', ha='center', va='center')
         axes[1, 0].set_title('Peak Intensity Distribution')
-    
+
     # Bottom-right: Spatial distribution
     axes[1, 1].imshow(bg_img, cmap='gray', alpha=0.5)
-    if peaks.size > 0:
+    if coord_peaks.size > 0:
         # Create density map
         from scipy.stats import gaussian_kde
-        if len(peaks) > 1:
+        if len(coord_peaks) > 1:
             try:
-                kde = gaussian_kde(peaks.T)
+                kde = gaussian_kde(coord_peaks[:, :2].T)
                 y, x = np.mgrid[0:prob_map.shape[0]:50j, 0:prob_map.shape[1]:50j]
                 positions = np.vstack([x.ravel(), y.ravel()])
                 density = kde(positions).reshape(x.shape)
-                
+
                 contour = axes[1, 1].contour(x, y, density, levels=5, alpha=0.7, cmap='Reds')
                 axes[1, 1].clabel(contour, inline=True, fontsize=8)
             except:
                 pass  # Skip density plot if it fails
-        
-        axes[1, 1].scatter(peaks[:, 1], peaks[:, 0], c='red', s=10, alpha=0.8)
-    
+
+        axes[1, 1].scatter(coord_peaks[:, 1], coord_peaks[:, 0], c='red', s=10, alpha=0.8)
+
     axes[1, 1].set_title('Spatial Distribution with Density Contours')
     axes[1, 1].axis('off')
     
@@ -8390,7 +8533,15 @@ def create_detection_visualization(prob_map: np.ndarray, peaks: np.ndarray, base
 def assign_peaks_to_regions(peaks, labeled_mask, valid_regions):
     """Assign detected peaks to their corresponding region with improved accuracy."""
     from matplotlib.path import Path
-    
+
+    peaks = np.asarray(peaks)
+    if peaks.size == 0:
+        coord_peaks = np.empty((0, 2), dtype=int)
+    else:
+        if peaks.ndim == 1:
+            peaks = peaks.reshape(1, -1)
+        coord_peaks = np.asarray(peaks[:, :2], dtype=int)
+
     region_polygons = {}
     for region in valid_regions:
         label_val = region.label
@@ -8410,30 +8561,33 @@ def assign_peaks_to_regions(peaks, labeled_mask, valid_regions):
     region_peaks_dict = {region.label: [] for region in valid_regions}
     unassigned_peaks = []
     
-    for peak in peaks:
-        r, c = peak
+    for peak in coord_peaks:
+        r, c = map(int, peak[:2])
         # First, try direct mask lookup
         region_label = labeled_mask[r, c]
         if region_label != 0 and region_label in region_peaks_dict:
-            region_peaks_dict[region_label].append(peak)
+            region_peaks_dict[region_label].append(np.array([r, c], dtype=int))
         else:
             # Fall back to polygon containment check
             assigned = False
             for label_val, path in region_polygons.items():
                 if path is not None and path.contains_point((c, r)):
-                    region_peaks_dict[label_val].append(peak)
+                    region_peaks_dict[label_val].append(np.array([r, c], dtype=int))
                     assigned = True
                     break
             if not assigned:
-                unassigned_peaks.append(peak)
+                unassigned_peaks.append(np.array([r, c], dtype=int))
     
     if unassigned_peaks:
         logger.warning(f"{len(unassigned_peaks)} peaks could not be assigned to regions")
     
     # Convert lists to arrays
     for label_val in region_peaks_dict:
-        region_peaks_dict[label_val] = np.array(region_peaks_dict[label_val])
-    
+        if region_peaks_dict[label_val]:
+            region_peaks_dict[label_val] = np.array(region_peaks_dict[label_val], dtype=int)
+        else:
+            region_peaks_dict[label_val] = np.empty((0, 2), dtype=int)
+
     return region_peaks_dict
 
 def voronoi_average_cell_stats(region, region_peaks, cfg=CONFIG):
