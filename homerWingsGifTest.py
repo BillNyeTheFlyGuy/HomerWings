@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, NamedTuple
 
 import h5py
 import imageio
@@ -183,6 +183,15 @@ class TrichomeDetectionConfig:
         logger.info("Enhanced configuration validation passed")
 
 CONFIG = TrichomeDetectionConfig()
+
+
+class ProbabilityConsensus(NamedTuple):
+    """Bundle the probability consensus outputs for downstream refinements."""
+
+    mask: np.ndarray
+    vote_map: np.ndarray
+    threshold: float
+
 class HybridWingDetector:
     """Hybrid wing detector that combines probability maps with trichome validation."""
     
@@ -236,31 +245,60 @@ class HybridWingDetector:
             intervein_prob = prob_map[..., 3]
             # Wing areas typically have moderate to high intervein probability
             intervein_mask = (intervein_prob > 0.2) & (intervein_prob < 1)
-            candidate_masks.append(('intervein', intervein_mask))
+            intervein_context = {}
+            if np.any(intervein_mask):
+                values = intervein_prob[intervein_mask]
+                intervein_context = {
+                    'mean_probability': float(np.mean(values)),
+                    'std_probability': float(np.std(values)),
+                    'expected_range': (0.35, 0.9),
+                    'expected_span': 0.55,
+                }
+            candidate_masks.append(('intervein', intervein_mask, intervein_context))
             logger.info(f"Intervein method: {np.sum(intervein_mask)} pixels")
-        
+
         # Method 2: Vein probability (inverted - wing is where veins are NOT)
         if prob_map.shape[-1] >= 3:
             vein_prob = prob_map[..., 2]
             # Wing tissue has low to moderate vein probability
             non_vein_mask = vein_prob < 0.7
-            candidate_masks.append(('non_vein', non_vein_mask))
+            non_vein_context = {}
+            if np.any(non_vein_mask):
+                values = 1.0 - np.clip(vein_prob[non_vein_mask], 0.0, 1.0)
+                non_vein_context = {
+                    'mean_probability': float(np.mean(values)),
+                    'std_probability': float(np.std(values)),
+                    'expected_range': (0.3, 0.95),
+                    'expected_span': 0.65,
+                }
+            candidate_masks.append(('non_vein', non_vein_mask, non_vein_context))
             logger.info(f"Non-vein method: {np.sum(non_vein_mask)} pixels")
-        
+
         # Method 3: Background probability (inverted)
         if prob_map.shape[-1] >= 2:
             bg_prob = prob_map[..., 1]
             # Wing areas have low background probability
             non_bg_mask = bg_prob < 0.5
-            candidate_masks.append(('non_background', non_bg_mask))
+            non_bg_context = {}
+            if np.any(non_bg_mask):
+                background_values = np.clip(bg_prob[non_bg_mask], 0.0, 1.0)
+                support_values = 1.0 - background_values
+                non_bg_context = {
+                    'mean_probability': float(np.mean(support_values)),
+                    'std_probability': float(np.std(support_values)),
+                    'mean_background': float(np.mean(background_values)),
+                    'expected_range': (0.35, 0.95),
+                    'expected_span': 0.6,
+                }
+            candidate_masks.append(('non_background', non_bg_mask, non_bg_context))
             logger.info(f"Non-background method: {np.sum(non_bg_mask)} pixels")
-        
+
         # Method 4: Raw image intensity (if available)
         if raw_img is not None:
-            intensity_mask = self._intensity_based_mask(raw_img)
-            candidate_masks.append(('intensity', intensity_mask))
+            intensity_mask, intensity_context = self._intensity_based_mask(raw_img)
+            candidate_masks.append(('intensity', intensity_mask, intensity_context))
             logger.info(f"Intensity method: {np.sum(intensity_mask)} pixels")
-        
+
         # Method 5: Combined probability approach
         if prob_map.shape[-1] >= 4:
             # Wing areas: high trichome + moderate intervein + low background + low vein
@@ -271,35 +309,64 @@ class HybridWingDetector:
                 (bg_prob < 0.6) &  # Not pure background
                 (vein_prob < 0.8)   # Not pure vein
             )
-            candidate_masks.append(('combined', combined_mask))
+            combined_context = {}
+            if np.any(combined_mask):
+                trichome_values = np.clip(trichome_prob[combined_mask], 0.0, 1.0)
+                intervein_values = np.clip(intervein_prob[combined_mask], 0.0, 1.0)
+                support_fraction = float(np.mean(trichome_values > 0.3))
+                combined_context = {
+                    'mean_probability': float(np.mean(trichome_values * 0.6 + intervein_values * 0.4)),
+                    'std_probability': float(np.std(trichome_values)),
+                    'support_fraction': support_fraction,
+                    'expected_range': (0.25, 0.9),
+                    'expected_span': 0.65,
+                }
+            candidate_masks.append(('combined', combined_mask, combined_context))
             logger.info(f"Combined method: {np.sum(combined_mask)} pixels")
-        
+
         # Combine all methods using voting
-        return self._combine_probability_methods(candidate_masks, prob_map.shape[:2])
+        consensus = self._combine_probability_methods(candidate_masks, prob_map.shape[:2])
+
+        # Focus subsequent refinements on the wing ROI and clean low-confidence borders
+        roi_consensus = self._apply_adaptive_roi_refinement(consensus, prob_map, raw_img)
+        final_mask = self._apply_uncertainty_postprocessing(roi_consensus, prob_map, raw_img)
+
+        return final_mask
     
     def _intensity_based_mask(self, raw_img):
         """Create wing mask from raw image intensity."""
         # Normalize
         raw_norm = (raw_img - raw_img.min()) / (raw_img.max() - raw_img.min() + 1e-8)
-        
+
         # Wing tissue is typically in middle intensity range
         # Avoid pure black (mounting medium) and pure white (bright reflections)
         intensity_mask = (raw_norm > 0.1) & (raw_norm < 0.9)
-        
+
         # Use Otsu thresholding as additional guide
         otsu_thresh = filters.threshold_otsu(raw_norm)
         otsu_mask = raw_norm > otsu_thresh * 0.8  # Slightly more inclusive
-        
+
         # Combine both approaches
         combined = intensity_mask | otsu_mask
-        
-        return combined
-    
+
+        context = {}
+        if np.any(combined):
+            values = raw_norm[combined]
+            if values.size:
+                iqr = float(np.percentile(values, 75) - np.percentile(values, 25))
+                context = {
+                    'mean_intensity': float(np.mean(values)),
+                    'intensity_iqr': iqr,
+                }
+
+        return combined, context
+
     def _combine_probability_methods(self, candidate_masks, shape):
         """Combine multiple probability-based methods using intelligent voting."""
         if not candidate_masks:
-            return np.zeros(shape, dtype=bool)
-        
+            empty = np.zeros(shape, dtype=bool)
+            return ProbabilityConsensus(empty, np.zeros(shape, dtype=np.float32), 0.45)
+
         # Create voting map
         vote_map = np.zeros(shape, dtype=np.float32)
         base_weights = {
@@ -334,7 +401,7 @@ class HybridWingDetector:
         
         # Clean up the consensus mask
         consensus_mask = self._clean_probability_mask(consensus_mask)
-        
+
         logger.info(f"Probability consensus: {np.sum(consensus_mask)} pixels")
         return consensus_mask
 
@@ -425,22 +492,169 @@ class HybridWingDetector:
         """Clean up probability-based mask with morphological operations."""
         # Remove noise
         cleaned = morphology.remove_small_objects(mask, min_size=5000)
-        
+
         # Fill holes
         cleaned = morphology.remove_small_holes(cleaned, area_threshold=10000)
-        
+
         # Gentle morphological operations
         cleaned = morphology.binary_opening(cleaned, morphology.disk(3))
         cleaned = morphology.binary_closing(cleaned, morphology.disk(8))
-        
+
         # Keep only the largest connected component
         labeled = label(cleaned)
         if labeled.max() > 0:
             regions = regionprops(labeled)
             largest = max(regions, key=lambda r: r.area)
             cleaned = labeled == largest.label
-        
+
         return cleaned
+
+    def _apply_adaptive_roi_refinement(self, consensus: ProbabilityConsensus, prob_map, raw_img):
+        """Re-run probability cleanup inside an adaptive ROI around the wing."""
+
+        mask = consensus.mask.copy()
+        vote_map = consensus.vote_map
+        threshold = consensus.threshold
+
+        if mask is None or not np.any(mask):
+            return consensus
+
+        labeled = label(mask)
+        if labeled.max() == 0:
+            return consensus
+
+        regions = regionprops(labeled)
+        largest = max(regions, key=lambda r: r.area)
+        min_row, min_col, max_row, max_col = largest.bbox
+
+        height = max_row - min_row
+        width = max_col - min_col
+        pad_y = max(int(height * 0.12), 15)
+        pad_x = max(int(width * 0.12), 15)
+
+        y0 = max(0, min_row - pad_y)
+        x0 = max(0, min_col - pad_x)
+        y1 = min(mask.shape[0], max_row + pad_y)
+        x1 = min(mask.shape[1], max_col + pad_x)
+
+        roi_slice = (slice(y0, y1), slice(x0, x1))
+        roi_mask = mask[roi_slice]
+        roi_votes = vote_map[roi_slice]
+
+        confident_votes = roi_votes[roi_mask]
+        if confident_votes.size == 0:
+            return consensus
+
+        percentile_threshold = float(np.clip(np.percentile(confident_votes, 30), 0.28, 0.6))
+        mean_threshold = float(np.mean(confident_votes))
+        adaptive_threshold = float(np.clip((percentile_threshold * 0.6 + mean_threshold * 0.4), 0.3, 0.62))
+
+        refined_roi = roi_votes > adaptive_threshold
+
+        if prob_map is not None and prob_map.ndim >= 3:
+            roi_probs = prob_map[y0:y1, x0:x1]
+            if roi_probs.shape[-1] >= 2:
+                background = roi_probs[..., 1]
+                refined_roi &= background < 0.65
+            if roi_probs.shape[-1] >= 3:
+                vein_prob = roi_probs[..., 2]
+                refined_roi &= vein_prob < 0.88
+            if roi_probs.shape[-1] >= 4:
+                intervein_prob = roi_probs[..., 3]
+                refined_roi |= (intervein_prob > 0.35) & roi_mask
+
+        if raw_img is not None:
+            roi_img = raw_img[y0:y1, x0:x1].astype(np.float32)
+            roi_img -= roi_img.min()
+            roi_img /= (roi_img.max() + 1e-6)
+            gradient = filters.sobel(roi_img)
+            gradient /= (gradient.max() + 1e-6)
+            edge_barrier = gradient > np.percentile(gradient, 85)
+            uncertain_band = (roi_votes > adaptive_threshold - 0.08) & (roi_votes < adaptive_threshold + 0.08)
+            refined_roi[edge_barrier & uncertain_band] = False
+
+            if np.any(roi_mask):
+                bright_support = roi_img > np.percentile(roi_img[roi_mask], 60)
+                refined_roi |= bright_support & roi_votes > adaptive_threshold
+
+        refined_roi = morphology.binary_closing(refined_roi, morphology.disk(4))
+        refined_roi = morphology.binary_opening(refined_roi, morphology.disk(2))
+        refined_roi = morphology.remove_small_holes(refined_roi, area_threshold=8000)
+        refined_roi = morphology.remove_small_objects(refined_roi, min_size=8000)
+
+        refined_mask = mask.copy()
+        refined_mask[roi_slice] = refined_roi
+        refined_mask = self._clean_probability_mask(refined_mask)
+
+        updated_threshold = float(np.clip((threshold + adaptive_threshold) / 2.0, 0.32, 0.6))
+
+        return ProbabilityConsensus(refined_mask, vote_map, updated_threshold)
+
+    def _apply_uncertainty_postprocessing(self, consensus: ProbabilityConsensus, prob_map, raw_img):
+        """Apply morphology guided by uncertainty to smooth the final mask boundary."""
+
+        mask = consensus.mask.copy()
+        vote_map = consensus.vote_map
+        threshold = consensus.threshold
+
+        if vote_map is None or vote_map.size == 0:
+            return mask
+
+        confidence_band = 0.08
+        lower = threshold - confidence_band
+        upper = threshold + confidence_band
+        uncertain = (vote_map > lower) & (vote_map < upper)
+
+        if not np.any(uncertain):
+            return mask
+
+        support_map = np.zeros_like(mask, dtype=bool)
+        removal_map = np.zeros_like(mask, dtype=bool)
+
+        if prob_map is not None and prob_map.ndim >= 3:
+            if prob_map.shape[-1] >= 1:
+                trichome_prob = prob_map[..., 0]
+                support_map |= trichome_prob > 0.32
+            if prob_map.shape[-1] >= 2:
+                background_prob = prob_map[..., 1]
+                removal_map |= background_prob > 0.6
+            if prob_map.shape[-1] >= 4:
+                intervein_prob = prob_map[..., 3]
+                support_map |= intervein_prob > 0.33
+
+        contrast_support = None
+        if raw_img is not None:
+            raw_norm = raw_img.astype(np.float32)
+            raw_norm -= raw_norm.min()
+            raw_norm /= (raw_norm.max() + 1e-6)
+            smooth = gaussian_filter(raw_norm, sigma=3)
+            local_contrast = np.abs(raw_norm - smooth)
+            contrast_level = np.percentile(local_contrast[mask], 60) if np.any(mask) else 0.08
+            contrast_support = local_contrast > contrast_level
+            support_map |= contrast_support
+            removal_map |= local_contrast < np.percentile(local_contrast, 35)
+
+        uncertain_interior = uncertain & mask
+        uncertain_exterior = uncertain & (~mask)
+
+        add_candidates = uncertain_exterior & support_map
+        add_candidates = morphology.binary_closing(add_candidates, morphology.disk(2))
+        mask[add_candidates] = True
+
+        remove_candidates = uncertain_interior & removal_map
+        remove_candidates = morphology.binary_opening(remove_candidates, morphology.disk(2))
+        mask[remove_candidates] = False
+
+        boundary = morphology.binary_dilation(mask, morphology.disk(2)) ^ morphology.binary_erosion(mask, morphology.disk(2))
+        boundary_focus = boundary & uncertain
+        if np.any(boundary_focus):
+            smoothed = morphology.binary_closing(boundary_focus, morphology.disk(1))
+            mask[boundary_focus] = smoothed[boundary_focus]
+
+        mask = morphology.remove_small_holes(mask, area_threshold=7000)
+        mask = morphology.remove_small_objects(mask, min_size=7000)
+
+        return mask
     
     def _sparse_wing_detection(self, prob_map, raw_img, peaks, prob_wing_mask):
         """Detection optimized for sparse wings - rely heavily on probability map."""
