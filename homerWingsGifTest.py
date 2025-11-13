@@ -67,122 +67,6 @@ PIXELS_PER_MICRON = 1.4464
 
 
 
-# @dataclass
-# class TrichomeDetectionConfig:
-#     """Enhanced configuration with automated vein detection parameters and hybrid detection."""
-    
-#     # Core detection parameters
-#     min_distance: int = 8
-#     high_thresh_abs: float = 0.30
-#     low_thresh_abs: float = 0.20
-    
-#     # Multi-scale detection
-#     scales: List[float] = field(default_factory=lambda: [0.8, 1.0, 1.2])
-#     scale_weight_decay: float = 0.8
-    
-#     # Pre-processing
-#     use_clahe: bool = False
-#     clahe_clip_limit: float = 0.01
-#     clahe_tile_grid: Optional[int] = None
-    
-#     use_white_tophat: bool = True
-#     tophat_radius: int = 2
-    
-#     use_local_threshold: bool = True
-#     local_block_size: int = 71
-#     local_offset: float = 0.0
-    
-#     # Advanced peak detection
-#     two_pass: bool = True
-#     h_prominence: float = 0.40
-#     peak_rel_threshold: float = 0.50
-    
-#     # Quality control parameters
-#     min_peak_intensity: float = 0.25
-#     max_peak_density: float = 0.002
-#     edge_exclusion_buffer: int = 10
-    
-#     # Clustering and filtering
-#     dbscan_eps: float = 10.0
-#     dbscan_min_samples: int = 1
-#     valley_drop: float = 0.25
-#     neighbour_tolerance: float = 0.20
-#     min_neighbours: int = 7
-    
-#     # Intervein segmentation
-#     intervein_threshold: float = 0.2
-#     min_region_area: int = 60000
-#     max_region_area: int = 1500000
-#     max_hole_size: int = 10000
-    
-#     # IMPROVED VEIN DETECTION PARAMETERS
-#     vein_width_estimate: int = 3
-#     min_vein_length: int = 100
-#     vein_detection_sensitivity: float = 0.9
-#     use_template_matching: bool = True
-#     use_vesselness_filters: bool = True
-#     use_morphological_detection: bool = True
-#     background_mask_threshold: float = 0.8  # Threshold for background masking
-#     enable_background_masking: bool = True  # Enable/disable background masking
-#     # Wing-specific parameters
-#     wing_orientation_correction: bool = True
-#     expected_wing_aspect_ratio: float = 2.5
-#     min_wing_area: int = 100000  # Minimum area for valid wing
-#     border_buffer: int = 20  # Buffer from image edge for valid wings
-    
-#     # Intervein region refinement
-#     auto_intervein_min_area: int = 400
-#     auto_intervein_max_area: int = 800000
-#     intervein_shape_filter: bool = True
-#     min_intervein_solidity: float = 0.4
-    
-#     # === NEW: Hybrid detection parameters ===
-#     use_hybrid_detection: bool = True
-#     sparse_threshold: float = 0.1  # Trichome density threshold for sparse wings
-#     prob_weight: float = 0.8  # Weight for probability-based detection
-#     trichome_weight: float = 0.2  # Weight for trichome validation
-    
-#     # Sparse wing handling
-#     conservative_string_removal: bool = False
-#     probability_dominant_sparse: bool = True
-#     min_trichomes_for_validation: int = 50
-    
-#     # Detection method selection
-#     wing_detection_method: str = "hybrid"  # "hybrid", "probability", "trichome"
-    
-#     def validate(self) -> None:
-#         """Enhanced validation including hybrid parameters."""
-#         # Original validation
-#         if self.min_distance < 1:
-#             raise ValueError("min_distance must be >= 1")
-#         if not 0 < self.high_thresh_abs <= 1:
-#             raise ValueError("high_thresh_abs must be in (0, 1]")
-#         if not 0 < self.low_thresh_abs <= 1:
-#             raise ValueError("low_thresh_abs must be in (0, 1]")
-#         if self.local_block_size % 2 == 0:
-#             raise ValueError("local_block_size must be odd")
-#         if self.tophat_radius < 1:
-#             raise ValueError("tophat_radius must be >= 1")
-        
-#         # Validate hybrid-specific parameters
-#         if not 0 <= self.sparse_threshold <= 1:
-#             raise ValueError("sparse_threshold must be between 0 and 1")
-#         if not 0 <= self.prob_weight <= 1:
-#             raise ValueError("prob_weight must be between 0 and 1")
-#         if not 0 <= self.trichome_weight <= 1:
-#             raise ValueError("trichome_weight must be between 0 and 1")
-#         if abs(self.prob_weight + self.trichome_weight - 1.0) > 0.01:
-#             logger.warning("prob_weight + trichome_weight should sum to 1.0")
-#         if self.min_trichomes_for_validation < 1:
-#             raise ValueError("min_trichomes_for_validation must be >= 1")
-#         if self.wing_detection_method not in ["hybrid", "probability", "trichome"]:
-#             raise ValueError("wing_detection_method must be 'hybrid', 'probability', or 'trichome'")
-        
-#         logger.info("Enhanced configuration validation passed")
-
-# CONFIG = TrichomeDetectionConfig()
-
-
 @dataclass
 class TrichomeDetectionConfig:
     """Enhanced configuration with automated vein detection parameters and hybrid detection."""
@@ -418,32 +302,124 @@ class HybridWingDetector:
         
         # Create voting map
         vote_map = np.zeros(shape, dtype=np.float32)
-        weights = {
-            'intervein': 0,
-            'combined': 0,
-            'non_background':1,
-            'non_vein': 0,
-            'intensity':0 
+        base_weights = {
+            'intervein': 0.25,
+            'combined': 0.30,
+            'non_background': 0.20,
+            'non_vein': 0.15,
+            'intensity': 0.12,
         }
-        
-        total_weight = 0
+
+        total_weight = 0.0
         for name, mask in candidate_masks:
-            weight = weights.get(name, 0.1)
-            vote_map += mask.astype(np.float32) * weight
-            total_weight += weight
-        
+            base_weight = base_weights.get(name, 0.1)
+            adjusted_weight = self._evaluate_candidate_mask(name, mask, base_weight)
+
+            if adjusted_weight <= 0:
+                logger.debug("Skipping %s mask due to negligible reliability", name)
+                continue
+
+            vote_map += mask.astype(np.float32) * adjusted_weight
+            total_weight += adjusted_weight
+
+        if total_weight <= 0:
+            logger.warning("All probability masks failed reliability checks; returning empty mask")
+            return np.zeros(shape, dtype=bool)
+
         # Normalize votes
-        if total_weight > 0:
-            vote_map /= total_weight
-        
-        # Threshold voting - require at least 40% agreement
-        consensus_mask = vote_map > 0.4
+        vote_map /= total_weight
+
+        # Threshold voting - require at least 45% agreement from reliable sources
+        consensus_mask = vote_map > 0.45
         
         # Clean up the consensus mask
         consensus_mask = self._clean_probability_mask(consensus_mask)
         
         logger.info(f"Probability consensus: {np.sum(consensus_mask)} pixels")
         return consensus_mask
+
+    def _evaluate_candidate_mask(self, name, mask, base_weight):
+        """Scale the base weight of a probability mask according to quality metrics."""
+
+        if mask is None or not np.any(mask):
+            return 0.0
+
+        metrics = self._mask_quality_metrics(mask)
+        reliability = 1.0
+
+        coverage = metrics['coverage']
+        expected_min_cov = self.config.min_wing_area / mask.size
+        expected_cov = np.clip(expected_min_cov * 3.0, 0.08, 0.4)
+        deviation = abs(coverage - expected_cov)
+        coverage_score = math.exp(-deviation / max(expected_cov, 1e-3))
+        reliability *= coverage_score
+
+        largest_area = metrics['largest_component_area']
+        min_area = max(self.config.min_wing_area, 1)
+        if largest_area < min_area * 0.4:
+            reliability *= 0.4
+        elif largest_area < min_area * 0.7:
+            reliability *= 0.7
+        elif largest_area < min_area:
+            reliability *= 0.9
+        else:
+            reliability *= 1.1
+
+        edge_contact = metrics['edge_contact_ratio']
+        if edge_contact > 0.3:
+            reliability *= 0.5
+        elif edge_contact > 0.15:
+            reliability *= 0.8
+
+        elongated = metrics['largest_component_eccentricity']
+        if elongated < 0.5:
+            reliability *= 0.85
+
+        reliability = np.clip(reliability, 0.05, 1.25)
+
+        logger.debug(
+            "Mask %s metrics: coverage=%.3f, largest=%d, edge=%.3f, ecc=%.3f, weight=%.3f",
+            name,
+            coverage,
+            largest_area,
+            edge_contact,
+            elongated,
+            base_weight * reliability,
+        )
+
+        return base_weight * reliability
+
+    def _mask_quality_metrics(self, mask):
+        """Calculate quality metrics for a candidate probability mask."""
+
+        coverage = float(np.sum(mask)) / float(mask.size)
+
+        largest_area = 0
+        eccentricity = 1.0
+
+        labeled = label(mask)
+        if labeled.max() > 0:
+            regions = regionprops(labeled)
+            largest_region = max(regions, key=lambda r: r.area)
+            largest_area = int(largest_region.area)
+            eccentricity = getattr(largest_region, 'eccentricity', 1.0) or 1.0
+
+        edge_contact_ratio = 0.0
+        mask_pixels = np.sum(mask)
+        if mask_pixels > 0:
+            border = min(self.config.border_buffer, mask.shape[0] // 4, mask.shape[1] // 4)
+            if border > 0:
+                interior = np.zeros_like(mask, dtype=bool)
+                interior[border:-border, border:-border] = True
+                interior_pixels = np.sum(mask & interior)
+                edge_contact_ratio = 1.0 - (interior_pixels / mask_pixels)
+
+        return {
+            'coverage': coverage,
+            'largest_component_area': largest_area,
+            'largest_component_eccentricity': float(eccentricity),
+            'edge_contact_ratio': float(edge_contact_ratio),
+        }
     
     def _clean_probability_mask(self, mask):
         """Clean up probability-based mask with morphological operations."""
@@ -708,19 +684,26 @@ class StringRemovalTrichomeFilter:
     def __init__(self, config):
         self.config = config
         # Parameters for string detection and removal
-        self.connection_distance = 25     # Max distance to consider trichomes "connected"
-        self.min_string_length = 8       # Min number of trichomes to be considered a "string"
-        self.max_string_width = 50       # Max width of valid string (bubbles are very thin)
-        self.linearity_threshold = 0.7   # How linear a string must be to be removed (0-1)
+        self.connection_distance = 25  # Max distance to consider trichomes "connected"
+
+        conservative = getattr(self.config, "conservative_string_removal", False)
+        if conservative:
+            self.min_string_length = 12
+            self.max_string_width = 30
+            self.linearity_threshold = 0.8
+        else:
+            self.min_string_length = 8
+            self.max_string_width = 50
+            self.linearity_threshold = 0.7
         
     def remove_trichome_strings(self, peaks, image_shape):
         """Remove long, thin strings of trichomes that represent bubble artifacts."""
         
         if len(peaks) < 20:
-            print("Too few trichomes for string filtering")
+            logger.info("Too few trichomes for string filtering")
             return peaks
-            
-        print(f"Filtering strings from {len(peaks)} trichomes...")
+
+        logger.info("Filtering strings from %d trichomes", len(peaks))
         
         # Step 1: Build connectivity graph between nearby trichomes
         adjacency_graph = self._build_trichome_graph(peaks)
@@ -735,8 +718,10 @@ class StringRemovalTrichomeFilter:
         filtered_peaks = self._remove_string_trichomes(peaks, string_components)
         
         removed_count = len(peaks) - len(filtered_peaks)
-        print(f"  Removed {removed_count} trichomes from {len(string_components)} string artifacts")
-        print(f"  Remaining: {len(filtered_peaks)} trichomes")
+        logger.info(
+            "Removed %d trichomes from %d string artifacts", removed_count, len(string_components)
+        )
+        logger.info("Remaining: %d trichomes", len(filtered_peaks))
         
         return filtered_peaks
     
@@ -793,97 +778,193 @@ class StringRemovalTrichomeFilter:
         string_components = []
         
         for i, component in enumerate(components):
-            if len(component) < self.min_string_length:
-                continue  # Too short to be a problematic string
-            
             component_peaks = peaks[component]
-            
-            # Calculate component geometry
-            is_string = self._is_linear_string(component_peaks)
-            
+
+            metrics = self._component_metrics(component_peaks)
+            if metrics['count'] < self.min_string_length:
+                logger.debug(
+                    "Component %d skipped (too few trichomes: %d)",
+                    i,
+                    metrics['count'],
+                )
+                continue  # Too short to be a problematic string
+
+            is_string = self._is_linear_string(component_peaks, metrics)
+
             if is_string:
                 string_components.append(component)
-                print(f"    String {len(string_components)}: {len(component)} trichomes")
+                logger.debug(
+                    "Component %d classified as string (%d trichomes, score=%.2f)",
+                    i,
+                    metrics['count'],
+                    metrics['string_score'],
+                )
             else:
-                print(f"    Blob {i}: {len(component)} trichomes (kept)")
-        
+                logger.debug(
+                    "Component %d kept as blob (%d trichomes, score=%.2f)",
+                    i,
+                    metrics['count'],
+                    metrics['string_score'],
+                )
+
         return string_components
-    
-    def _is_linear_string(self, component_peaks):
+
+    def _is_linear_string(self, component_peaks, metrics):
         """Check if a component is a linear string (bubble artifact)."""
-        
-        if len(component_peaks) < 3:
+
+        if metrics['count'] < 3:
             return False
-        
-        # Method 1: Check aspect ratio of bounding box
+
+        aspect_ratio = metrics['aspect_ratio']
+        linearity = metrics['linearity']
+        mst_ratio = metrics['mst_ratio']
+        direction_score = metrics['direction_score']
+        max_width = metrics['max_width']
+        span = metrics['span']
+
+        elongated_string = aspect_ratio > 6.0 and linearity > self.linearity_threshold
+        graph_string = mst_ratio > 5.0 and direction_score > 2.0
+        thin_string = max_width < self.max_string_width and span > 80 and linearity > (self.linearity_threshold * 0.9)
+
+        metrics['string_score'] = max(
+            aspect_ratio / 6.0,
+            linearity / max(self.linearity_threshold, 1e-3),
+            mst_ratio / 5.0,
+            direction_score / 2.0,
+        )
+
+        return elongated_string or graph_string or thin_string
+
+    def _component_metrics(self, component_peaks):
+        """Compute geometric and structural metrics for a trichome component."""
+
+        metrics = {
+            'count': len(component_peaks),
+            'aspect_ratio': 1.0,
+            'linearity': 1.0,
+            'mst_ratio': 0.0,
+            'direction_score': 0.0,
+            'max_width': 0.0,
+            'span': 0.0,
+            'string_score': 0.0,
+        }
+
+        if len(component_peaks) < 2:
+            return metrics
+
+        component_peaks = np.asarray(component_peaks)
+
         min_coords = np.min(component_peaks, axis=0)
         max_coords = np.max(component_peaks, axis=0)
-        bbox_dims = max_coords - min_coords
-        
-        if bbox_dims[0] > 0 and bbox_dims[1] > 0:
-            aspect_ratio = max(bbox_dims) / min(bbox_dims)
-            
-            # Very elongated = likely string
-            if aspect_ratio > 8.0:
-                return True
-        
-        # Method 2: Check linearity using PCA
+        bbox_dims = np.maximum(max_coords - min_coords, 1e-6)
+        metrics['span'] = float(np.linalg.norm(max_coords - min_coords))
+
+        min_dim = float(np.min(bbox_dims))
+        metrics['aspect_ratio'] = float(np.max(bbox_dims) / max(min_dim, 1e-6))
+
         try:
-            # Center the points
             centered = component_peaks - np.mean(component_peaks, axis=0)
-            
-            # Compute covariance matrix
             cov_matrix = np.cov(centered.T)
-            
-            # Get eigenvalues
-            eigenvalues = np.linalg.eigvals(cov_matrix)
-            eigenvalues = np.sort(eigenvalues)[::-1]  # Sort descending
-            
-            # Linearity measure: ratio of largest to smallest eigenvalue
-            if eigenvalues[1] > 0:
-                linearity = eigenvalues[0] / eigenvalues[1]
-                
-                # High linearity = string-like
-                if linearity > 15.0:
-                    return True
-        except:
-            pass  # Skip if PCA fails
-        
-        # Method 3: Check "width" of the string
-        if len(component_peaks) >= 4:
-            # Fit a line through the points and measure perpendicular distances
-            try:
-                # Simple line fitting using first and last points
-                start_point = component_peaks[0]
-                end_point = component_peaks[-1]
-                
-                # Vector along the line
-                line_vector = end_point - start_point
-                line_length = np.linalg.norm(line_vector)
-                
-                if line_length > 0:
-                    line_unit = line_vector / line_length
-                    
-                    # Calculate perpendicular distances
-                    perp_distances = []
-                    for point in component_peaks:
-                        to_point = point - start_point
-                        # Project onto line
-                        projection_length = np.dot(to_point, line_unit)
-                        projection = start_point + projection_length * line_unit
-                        # Perpendicular distance
-                        perp_dist = np.linalg.norm(point - projection)
-                        perp_distances.append(perp_dist)
-                    
-                    # If most points are very close to the line = string
-                    max_width = np.max(perp_distances)
-                    
-                    if max_width < self.max_string_width and line_length > 100:
-                        return True
-            except:
-                pass
-        
-        return False
+            eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+            order = np.argsort(eigenvalues)[::-1]
+            eigenvalues = np.clip(eigenvalues[order], 1e-6, None)
+            eigenvectors = eigenvectors[:, order]
+            metrics['linearity'] = float(eigenvalues[0] / eigenvalues[1])
+            principal_axis = eigenvectors[:, 0]
+        except (np.linalg.LinAlgError, ValueError) as exc:
+            logger.debug("PCA failed while evaluating string component: %s", exc)
+            principal_axis = np.array([1.0, 0.0])
+            metrics['linearity'] = 1.0
+
+        metrics['max_width'] = self._estimate_component_width(component_peaks, principal_axis)
+        metrics['direction_score'] = self._direction_consistency_score(component_peaks, principal_axis)
+        metrics['mst_ratio'] = self._mst_to_area_ratio(component_peaks)
+
+        return metrics
+
+    def _estimate_component_width(self, component_peaks, axis):
+        if len(component_peaks) < 2:
+            return 0.0
+
+        axis = axis / (np.linalg.norm(axis) + 1e-6)
+        start_point = component_peaks[np.argmin(component_peaks @ axis)]
+        line_vector = axis
+
+        perp_distances = []
+        for point in component_peaks:
+            to_point = point - start_point
+            projection_length = np.dot(to_point, line_vector)
+            projection = start_point + projection_length * line_vector
+            perp_distances.append(np.linalg.norm(point - projection))
+
+        return float(np.max(perp_distances)) if perp_distances else 0.0
+
+    def _direction_consistency_score(self, component_peaks, axis):
+        if len(component_peaks) < 3:
+            return 0.0
+
+        axis = axis / (np.linalg.norm(axis) + 1e-6)
+        projections = component_peaks @ axis
+        order = np.argsort(projections)
+        ordered = component_peaks[order]
+
+        step_vectors = np.diff(ordered, axis=0)
+        if len(step_vectors) == 0:
+            return 0.0
+
+        angles = np.arctan2(step_vectors[:, 0], step_vectors[:, 1])
+        unwrapped = np.unwrap(angles)
+        angle_std = np.std(unwrapped)
+
+        return float(1.0 / (angle_std + 0.05))
+
+    def _mst_to_area_ratio(self, component_peaks):
+        if len(component_peaks) < 3:
+            return 0.0
+
+        mst_length = self._compute_mst_length(component_peaks)
+
+        try:
+            hull = ConvexHull(component_peaks)
+            area = max(hull.volume, 1e-6)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("Convex hull failed while evaluating string component: %s", exc)
+            area = 1e-6
+
+        return float(mst_length / math.sqrt(area))
+
+    def _compute_mst_length(self, points):
+        if len(points) < 2:
+            return 0.0
+
+        remaining = set(range(len(points)))
+        current = remaining.pop()
+        visited = {current}
+        total_length = 0.0
+
+        while remaining:
+            best_distance = float('inf')
+            best_point = None
+
+            remaining_indices = list(remaining)
+
+            for v in visited:
+                candidate_points = points[remaining_indices]
+                distances = np.linalg.norm(candidate_points - points[v], axis=1)
+                min_idx = int(np.argmin(distances))
+                distance = float(distances[min_idx])
+                if distance < best_distance:
+                    best_distance = distance
+                    best_point = remaining_indices[min_idx]
+
+            if best_point is None:
+                break
+
+            total_length += best_distance
+            visited.add(best_point)
+            remaining.remove(best_point)
+
+        return float(total_length)
     
     def _remove_string_trichomes(self, peaks, string_components):
         """Remove trichomes that belong to string components."""
@@ -903,10 +984,12 @@ class StringRemovalTrichomeFilter:
         """Create wing mask from filtered trichomes using simple approach."""
         
         if len(filtered_peaks) < 10:
-            print("Too few filtered trichomes")
+            logger.info("Too few filtered trichomes for wing mask generation")
             return None
-        
-        print(f"Creating wing mask from {len(filtered_peaks)} filtered trichomes...")
+
+        logger.info(
+            "Creating wing mask from %d filtered trichomes", len(filtered_peaks)
+        )
         
         # Method: Dense region growing
         density_map = np.zeros(image_shape, dtype=np.float32)
@@ -928,7 +1011,11 @@ class StringRemovalTrichomeFilter:
         
         # Smooth the density map
         density_map = ndimage.gaussian_filter(density_map, sigma=3)
-        
+
+        if not np.any(density_map > 0):
+            logger.warning("Density map contained no positive values; skipping wing mask")
+            return None
+
         # Threshold to get wing regions
         threshold = np.percentile(density_map[density_map > 0], 20)  # Keep top 80%
         wing_mask = density_map > threshold
@@ -945,7 +1032,7 @@ class StringRemovalTrichomeFilter:
             largest = max(regions, key=lambda r: r.area)
             wing_mask = labeled == largest.label
         
-        print(f"  Wing mask: {np.sum(wing_mask)} pixels")
+        logger.info("Wing mask generated with %d pixels", int(np.sum(wing_mask)))
         return wing_mask
     
     def visualize_string_removal(self, original_peaks, filtered_peaks, removed_peaks, 
@@ -1015,7 +1102,7 @@ class StringRemovalTrichomeFilter:
         plt.savefig(output_path, dpi=200, bbox_inches='tight')
         plt.close()
         
-        print(f"Saved string removal visualization to {output_path}")
+        logger.info("Saved string removal visualization to %s", output_path)
 
 
 class EnhancedStringRemovalFilter(StringRemovalTrichomeFilter):
@@ -1049,323 +1136,6 @@ class EnhancedStringRemovalFilter(StringRemovalTrichomeFilter):
         else:
             # Standard string removal for dense wings
             return self.remove_trichome_strings(peaks, image_shape)
-
-class StringRemovalTrichomeFilter:
-    """Remove long strings of trichomes (bubble artifacts) using morphological-like operations."""
-    
-    def __init__(self, config):
-        self.config = config
-        # Parameters for string detection and removal
-        self.connection_distance = 25     # Max distance to consider trichomes "connected"
-        self.min_string_length = 8       # Min number of trichomes to be considered a "string"
-        self.max_string_width = 10       # Max width of valid string (bubbles are very thin)
-        self.linearity_threshold = 0.9   # How linear a string must be to be removed (0-1)
-        
-    def remove_trichome_strings(self, peaks, image_shape):
-        """Remove long, thin strings of trichomes that represent bubble artifacts."""
-        
-        if len(peaks) < 20:
-            print("Too few trichomes for string filtering")
-            return peaks
-            
-        print(f"Filtering strings from {len(peaks)} trichomes...")
-        
-        # Step 1: Build connectivity graph between nearby trichomes
-        adjacency_graph = self._build_trichome_graph(peaks)
-        
-        # Step 2: Find connected components (chains/strings)
-        components = self._find_connected_components(adjacency_graph)
-        
-        # Step 3: Identify which components are "strings" vs "blobs"
-        string_components = self._identify_string_components(peaks, components)
-        
-        # Step 4: Remove trichomes that belong to string components
-        filtered_peaks = self._remove_string_trichomes(peaks, string_components)
-        
-        removed_count = len(peaks) - len(filtered_peaks)
-        print(f"  Removed {removed_count} trichomes from {len(string_components)} string artifacts")
-        print(f"  Remaining: {len(filtered_peaks)} trichomes")
-        
-        return filtered_peaks
-    
-    def _build_trichome_graph(self, peaks):
-        """Build graph of connected trichomes based on distance."""
-        n_peaks = len(peaks)
-        
-        # Calculate pairwise distances
-        distances = squareform(pdist(peaks))
-        
-        # Create adjacency matrix
-        adjacency = distances <= self.connection_distance
-        
-        # Remove self-connections
-        np.fill_diagonal(adjacency, False)
-        
-        return adjacency
-    
-    def _find_connected_components(self, adjacency_graph):
-        """Find connected components in the trichome graph."""
-        n_nodes = adjacency_graph.shape[0]
-        visited = np.zeros(n_nodes, dtype=bool)
-        components = []
-        
-        for start_node in range(n_nodes):
-            if visited[start_node]:
-                continue
-                
-            # BFS to find all connected nodes
-            component = []
-            queue = [start_node]
-            
-            while queue:
-                node = queue.pop(0)
-                if visited[node]:
-                    continue
-                    
-                visited[node] = True
-                component.append(node)
-                
-                # Add unvisited neighbors to queue
-                neighbors = np.where(adjacency_graph[node])[0]
-                for neighbor in neighbors:
-                    if not visited[neighbor]:
-                        queue.append(neighbor)
-            
-            if len(component) > 1:  # Only keep components with multiple trichomes
-                components.append(component)
-        
-        return components
-    
-    def _identify_string_components(self, peaks, components):
-        """Identify which components are long strings vs compact blobs."""
-        string_components = []
-        
-        for i, component in enumerate(components):
-            if len(component) < self.min_string_length:
-                continue  # Too short to be a problematic string
-            
-            component_peaks = peaks[component]
-            
-            # Calculate component geometry
-            is_string = self._is_linear_string(component_peaks)
-            
-            if is_string:
-                string_components.append(component)
-                print(f"    String {len(string_components)}: {len(component)} trichomes")
-            else:
-                print(f"    Blob {i}: {len(component)} trichomes (kept)")
-        
-        return string_components
-    
-    def _is_linear_string(self, component_peaks):
-        """Check if a component is a linear string (bubble artifact)."""
-        
-        if len(component_peaks) < 3:
-            return False
-        
-        # Method 1: Check aspect ratio of bounding box
-        min_coords = np.min(component_peaks, axis=0)
-        max_coords = np.max(component_peaks, axis=0)
-        bbox_dims = max_coords - min_coords
-        
-        if bbox_dims[0] > 0 and bbox_dims[1] > 0:
-            aspect_ratio = max(bbox_dims) / min(bbox_dims)
-            
-            # Very elongated = likely string
-            if aspect_ratio > 8.0:
-                return True
-        
-        # Method 2: Check linearity using PCA
-        try:
-            # Center the points
-            centered = component_peaks - np.mean(component_peaks, axis=0)
-            
-            # Compute covariance matrix
-            cov_matrix = np.cov(centered.T)
-            
-            # Get eigenvalues
-            eigenvalues = np.linalg.eigvals(cov_matrix)
-            eigenvalues = np.sort(eigenvalues)[::-1]  # Sort descending
-            
-            # Linearity measure: ratio of largest to smallest eigenvalue
-            if eigenvalues[1] > 0:
-                linearity = eigenvalues[0] / eigenvalues[1]
-                
-                # High linearity = string-like
-                if linearity > 15.0:
-                    return True
-        except:
-            pass  # Skip if PCA fails
-        
-        # Method 3: Check "width" of the string
-        if len(component_peaks) >= 4:
-            # Fit a line through the points and measure perpendicular distances
-            try:
-                # Simple line fitting using first and last points
-                start_point = component_peaks[0]
-                end_point = component_peaks[-1]
-                
-                # Vector along the line
-                line_vector = end_point - start_point
-                line_length = np.linalg.norm(line_vector)
-                
-                if line_length > 0:
-                    line_unit = line_vector / line_length
-                    
-                    # Calculate perpendicular distances
-                    perp_distances = []
-                    for point in component_peaks:
-                        to_point = point - start_point
-                        # Project onto line
-                        projection_length = np.dot(to_point, line_unit)
-                        projection = start_point + projection_length * line_unit
-                        # Perpendicular distance
-                        perp_dist = np.linalg.norm(point - projection)
-                        perp_distances.append(perp_dist)
-                    
-                    # If most points are very close to the line = string
-                    max_width = np.max(perp_distances)
-                    
-                    if max_width < self.max_string_width and line_length > 100:
-                        return True
-            except:
-                pass
-        
-        return False
-    
-    def _remove_string_trichomes(self, peaks, string_components):
-        """Remove trichomes that belong to string components."""
-        
-        # Flatten list of string indices
-        string_indices = set()
-        for component in string_components:
-            string_indices.update(component)
-        
-        # Keep trichomes that are NOT in string components
-        keep_mask = np.array([i not in string_indices for i in range(len(peaks))])
-        filtered_peaks = peaks[keep_mask]
-        
-        return filtered_peaks
-    
-    def create_wing_mask_simple(self, filtered_peaks, image_shape):
-        """Create wing mask from filtered trichomes using simple approach."""
-        
-        if len(filtered_peaks) < 10:
-            print("Too few filtered trichomes")
-            return None
-        
-        print(f"Creating wing mask from {len(filtered_peaks)} filtered trichomes...")
-        
-        # Method: Dense region growing
-        density_map = np.zeros(image_shape, dtype=np.float32)
-        
-        # Add gaussian blob at each trichome
-        sigma = 12  # Smoothing radius
-        for peak in filtered_peaks:
-            y, x = peak
-            
-            # Add gaussian contribution
-            radius = int(3 * sigma)
-            y_min, y_max = max(0, y-radius), min(image_shape[0], y+radius+1)
-            x_min, x_max = max(0, x-radius), min(image_shape[1], x+radius+1)
-            
-            if y_max > y_min and x_max > x_min:
-                yy, xx = np.mgrid[y_min:y_max, x_min:x_max]
-                gaussian = np.exp(-((yy-y)**2 + (xx-x)**2) / (2*sigma**2))
-                density_map[y_min:y_max, x_min:x_max] += gaussian
-        
-        # Smooth the density map
-        density_map = ndimage.gaussian_filter(density_map, sigma=3)
-        
-        # Threshold to get wing regions
-        threshold = np.percentile(density_map[density_map > 0], 20)  # Keep top 80%
-        wing_mask = density_map > threshold
-        
-        # Clean up
-        wing_mask = morphology.binary_closing(wing_mask, morphology.disk(8))
-        wing_mask = morphology.remove_small_holes(wing_mask, area_threshold=10000)
-        wing_mask = morphology.remove_small_objects(wing_mask, min_size=20000)
-        
-        # Keep largest component
-        labeled = measure.label(wing_mask)
-        if labeled.max() > 0:
-            regions = measure.regionprops(labeled)
-            largest = max(regions, key=lambda r: r.area)
-            wing_mask = labeled == largest.label
-        
-        print(f"  Wing mask: {np.sum(wing_mask)} pixels")
-        return wing_mask
-    
-    def visualize_string_removal(self, original_peaks, filtered_peaks, removed_peaks, 
-                                wing_mask, prob_map, raw_img, output_path):
-        """Visualize the string removal process."""
-        
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        
-        bg_img = raw_img if raw_img is not None else prob_map[..., 0]
-        
-        # Top row: filtering process
-        axes[0, 0].imshow(bg_img, cmap='gray')
-        if len(original_peaks) > 0:
-            axes[0, 0].scatter(original_peaks[:, 1], original_peaks[:, 0], 
-                             c='red', s=1, alpha=0.6)
-        axes[0, 0].set_title(f'All Detected Trichomes (n={len(original_peaks)})')
-        axes[0, 0].axis('off')
-        
-        # Show removed strings
-        axes[0, 1].imshow(bg_img, cmap='gray')
-        if len(removed_peaks) > 0:
-            axes[0, 1].scatter(removed_peaks[:, 1], removed_peaks[:, 0], 
-                             c='red', s=3, alpha=0.8)
-        axes[0, 1].set_title(f'Removed String Artifacts (n={len(removed_peaks)})')
-        axes[0, 1].axis('off')
-        
-        # Show kept trichomes
-        axes[0, 2].imshow(bg_img, cmap='gray')
-        if len(filtered_peaks) > 0:
-            axes[0, 2].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], 
-                             c='blue', s=2, alpha=0.8)
-        axes[0, 2].set_title(f'Kept Trichomes (n={len(filtered_peaks)})')
-        axes[0, 2].axis('off')
-        
-        # Bottom row: results
-        if wing_mask is not None:
-            axes[1, 0].imshow(wing_mask, cmap='viridis')
-            axes[1, 0].set_title(f'String-Filtered Wing Mask')
-        else:
-            axes[1, 0].text(0.5, 0.5, 'Wing mask failed', ha='center', va='center')
-            axes[1, 0].set_title('Wing Mask (Failed)')
-        axes[1, 0].axis('off')
-        
-        # Show comparison: before vs after
-        axes[1, 1].imshow(bg_img, cmap='gray')
-        if len(original_peaks) > 0:
-            axes[1, 1].scatter(original_peaks[:, 1], original_peaks[:, 0], 
-                             c='red', s=1, alpha=0.3, label='Original')
-        if len(filtered_peaks) > 0:
-            axes[1, 1].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], 
-                             c='blue', s=2, alpha=0.8, label='Filtered')
-        axes[1, 1].legend()
-        axes[1, 1].set_title('Before vs After Filtering')
-        axes[1, 1].axis('off')
-        
-        # Final result
-        axes[1, 2].imshow(bg_img, cmap='gray')
-        if wing_mask is not None:
-            axes[1, 2].imshow(wing_mask, cmap='Blues', alpha=0.4)
-        if len(filtered_peaks) > 0:
-            axes[1, 2].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], 
-                             c='yellow', s=1, alpha=0.8)
-        axes[1, 2].set_title('Final Wing Boundary')
-        axes[1, 2].axis('off')
-        
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
-        plt.close()
-        
-        print(f"Saved string removal visualization to {output_path}")
-
-
 
 class TrichomeAnalysisGUI:
     def __init__(self, root):
@@ -2617,18 +2387,6 @@ Processing time: {self.processing_time:.2f}s
 Scales used: {self.scales_used}
 """
         return report
-
-
-
-
-
-
-logger = logging.getLogger(__name__)
-
-
-
-
-
 def detect_wing_boundary_from_trichomes(self, prob_map, raw_img=None, peaks=None):
     """Enhanced wing boundary detection using filtered trichomes."""
     
