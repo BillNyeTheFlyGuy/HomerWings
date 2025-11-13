@@ -378,14 +378,9 @@ class HybridWingDetector:
         }
 
         total_weight = 0.0
-        for candidate in candidate_masks:
-            if len(candidate) == 3:
-                name, mask, context = candidate
-            else:
-                name, mask = candidate
-                context = None
+        for name, mask in candidate_masks:
             base_weight = base_weights.get(name, 0.1)
-            adjusted_weight = self._evaluate_candidate_mask(name, mask, base_weight, context)
+            adjusted_weight = self._evaluate_candidate_mask(name, mask, base_weight)
 
             if adjusted_weight <= 0:
                 logger.debug("Skipping %s mask due to negligible reliability", name)
@@ -396,47 +391,21 @@ class HybridWingDetector:
 
         if total_weight <= 0:
             logger.warning("All probability masks failed reliability checks; returning empty mask")
-            empty_mask = np.zeros(shape, dtype=bool)
-            return ProbabilityConsensus(empty_mask, vote_map, 0.45)
+            return np.zeros(shape, dtype=bool)
 
         # Normalize votes
         vote_map /= total_weight
 
         # Threshold voting - require at least 45% agreement from reliable sources
-        base_threshold = 0.45
-        consensus_mask = vote_map > base_threshold
-
-        nominal_cov, min_cov, max_cov = self._expected_wing_coverage(shape)
-        actual_cov = float(np.mean(consensus_mask))
-        adjusted_threshold = base_threshold
-
-        if actual_cov < min_cov * 0.9:
-            adjusted_threshold = max(0.32, base_threshold - 0.1)
-        elif actual_cov < nominal_cov * 0.7:
-            adjusted_threshold = max(0.35, base_threshold - 0.06)
-        elif actual_cov > max_cov * 1.1:
-            adjusted_threshold = min(0.65, base_threshold + 0.08)
-        elif actual_cov > nominal_cov * 1.6:
-            adjusted_threshold = min(0.6, base_threshold + 0.05)
-
-        if adjusted_threshold != base_threshold:
-            logger.info(
-                "Adjusting consensus threshold from %.2f to %.2f (coverage %.3f, target %.3f-%.3f)",
-                base_threshold,
-                adjusted_threshold,
-                actual_cov,
-                min_cov,
-                max_cov,
-            )
-            consensus_mask = vote_map > adjusted_threshold
-
+        consensus_mask = vote_map > 0.45
+        
         # Clean up the consensus mask
         consensus_mask = self._clean_probability_mask(consensus_mask)
 
         logger.info(f"Probability consensus: {np.sum(consensus_mask)} pixels")
-        return ProbabilityConsensus(consensus_mask, vote_map, adjusted_threshold)
+        return consensus_mask
 
-    def _evaluate_candidate_mask(self, name, mask, base_weight, context=None):
+    def _evaluate_candidate_mask(self, name, mask, base_weight):
         """Scale the base weight of a probability mask according to quality metrics."""
 
         if mask is None or not np.any(mask):
@@ -473,9 +442,7 @@ class HybridWingDetector:
         if elongated < 0.5:
             reliability *= 0.85
 
-        reliability *= self._contextual_confidence(name, context)
-
-        reliability = np.clip(reliability, 0.05, 1.4)
+        reliability = np.clip(reliability, 0.05, 1.25)
 
         logger.debug(
             "Mask %s metrics: coverage=%.3f, largest=%d, edge=%.3f, ecc=%.3f, weight=%.3f",
@@ -488,67 +455,6 @@ class HybridWingDetector:
         )
 
         return base_weight * reliability
-
-    def _contextual_confidence(self, name, context):
-        if not context:
-            return 1.0
-
-        confidence = 1.0
-
-        mean_prob = context.get('mean_probability')
-        if mean_prob is not None:
-            expected_range = context.get('expected_range', (0.25, 0.85))
-            lower, upper = expected_range
-            if upper > lower:
-                normalized = np.clip((mean_prob - lower) / (upper - lower), 0.0, 1.0)
-            else:
-                normalized = np.clip(mean_prob, 0.0, 1.0)
-            confidence *= 0.4 + 0.8 * normalized
-
-        std_prob = context.get('std_probability')
-        if std_prob is not None:
-            expected_span = context.get('expected_span', 0.5)
-            span = max(expected_span, 1e-3)
-            normalized_std = std_prob / span
-            confidence *= 1.0 / (1.0 + 0.9 * normalized_std)
-
-        mean_background = context.get('mean_background')
-        if mean_background is not None:
-            confidence *= 1.0 - 0.6 * np.clip(mean_background, 0.0, 1.0)
-
-        support_fraction = context.get('support_fraction')
-        if support_fraction is not None:
-            confidence *= 0.6 + 0.6 * np.clip(support_fraction, 0.0, 1.5)
-
-        mean_intensity = context.get('mean_intensity')
-        if mean_intensity is not None:
-            deviation = abs(mean_intensity - 0.5)
-            confidence *= float(np.clip(math.exp(-deviation / 0.18), 0.5, 1.25))
-
-        intensity_iqr = context.get('intensity_iqr')
-        if intensity_iqr is not None:
-            confidence *= float(np.clip(0.7 + intensity_iqr, 0.7, 1.3))
-
-        if name == 'combined':
-            confidence *= 1.05
-        elif name == 'intensity':
-            confidence *= 0.9
-
-        return float(np.clip(confidence, 0.3, 1.4))
-
-    def _expected_wing_coverage(self, shape):
-        total_pixels = max(float(shape[0] * shape[1]), 1.0)
-        min_cov = getattr(self.config, 'min_wing_area', 0) / total_pixels
-        min_cov = float(np.clip(min_cov, 0.02, 0.35))
-
-        max_region_area = getattr(self.config, 'max_region_area', None)
-        if max_region_area is None:
-            max_region_area = getattr(self.config, 'min_region_area', self.config.min_wing_area) * 4
-        max_cov = float(np.clip(max_region_area / total_pixels, min_cov + 0.05, 0.75))
-
-        nominal = float(np.clip((min_cov * 1.2 + max_cov * 0.8) / 2.0, min_cov, max_cov))
-
-        return nominal, min_cov, max_cov
 
     def _mask_quality_metrics(self, mask):
         """Calculate quality metrics for a candidate probability mask."""
