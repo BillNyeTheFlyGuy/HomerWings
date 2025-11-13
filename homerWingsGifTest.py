@@ -8413,14 +8413,22 @@ def _intensity_valley(proc: np.ndarray, p1: np.ndarray, p2: np.ndarray, samples:
     
     return np.min(line_intensities)
 
-def save_peak_coordinates_enhanced(peaks: np.ndarray, basename: str, output_dir: str, 
+def save_peak_coordinates_enhanced(peaks: np.ndarray, basename: str, output_dir: str,
                                  metrics: PeakDetectionMetrics, prob_map: np.ndarray) -> None:
     """Save peak coordinates with additional metadata and quality metrics."""
     output_path = os.path.join(output_dir, f"{basename}_peak_coordinates.csv")
-    
+
+    peaks = np.asarray(peaks)
+    if peaks.size == 0:
+        coord_peaks = np.empty((0, 2), dtype=int)
+    else:
+        if peaks.ndim == 1:
+            peaks = peaks.reshape(1, -1)
+        coord_peaks = np.asarray(peaks[:, :2], dtype=int)
+
     with open(output_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        
+
         # Write header with metadata
         writer.writerow(["# Trichome Peak Detection Results"])
         writer.writerow([f"# File: {basename}"])
@@ -8431,18 +8439,17 @@ def save_peak_coordinates_enhanced(peaks: np.ndarray, basename: str, output_dir:
         
         # Data header
         writer.writerow(["row", "col", "intensity", "local_max_score"])
-        
+
         # Write peak data with additional metrics
-        for peak in peaks:
-            r, c = peak
+        for r, c in coord_peaks:
             intensity = prob_map[r, c]
-            
+
             # Calculate local maximum score (how much higher than neighborhood)
             neighborhood = prob_map[max(0, r-3):r+4, max(0, c-3):c+4]
             local_max_score = intensity - np.median(neighborhood) if neighborhood.size > 1 else 0
-            
+
             writer.writerow([r, c, f"{intensity:.4f}", f"{local_max_score:.4f}"])
-    
+
     # Also save the metrics report
     metrics_path = os.path.join(output_dir, f"{basename}_detection_metrics.txt")
     with open(metrics_path, "w") as f:
@@ -8451,31 +8458,39 @@ def save_peak_coordinates_enhanced(peaks: np.ndarray, basename: str, output_dir:
     logger.info(f"Saved peak coordinates to {output_path}")
     logger.info(f"Saved detection metrics to {metrics_path}")
 
-def create_detection_visualization(prob_map: np.ndarray, peaks: np.ndarray, basename: str, 
+def create_detection_visualization(prob_map: np.ndarray, peaks: np.ndarray, basename: str,
                                  output_dir: str, raw_img: Optional[np.ndarray] = None) -> None:
     """Create comprehensive visualization of detection results."""
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    
+
     # Background image
     bg_img = raw_img if raw_img is not None else prob_map
-    
+
+    peaks = np.asarray(peaks)
+    if peaks.size == 0:
+        coord_peaks = np.empty((0, 2), dtype=int)
+    else:
+        if peaks.ndim == 1:
+            peaks = peaks.reshape(1, -1)
+        coord_peaks = np.asarray(peaks[:, :2], dtype=int)
+
     # Top-left: Original probability map
     axes[0, 0].imshow(prob_map, cmap='viridis')
     axes[0, 0].set_title('Trichome Probability Map')
     axes[0, 0].axis('off')
-    
+
     # Top-right: Detected peaks overlay
     axes[0, 1].imshow(bg_img, cmap='gray')
-    if peaks.size > 0:
-        axes[0, 1].scatter(peaks[:, 1], peaks[:, 0], c='red', s=20, alpha=0.7)
-    axes[0, 1].set_title(f'Detected Peaks (n={len(peaks)})')
+    if coord_peaks.size > 0:
+        axes[0, 1].scatter(coord_peaks[:, 1], coord_peaks[:, 0], c='red', s=20, alpha=0.7)
+    axes[0, 1].set_title(f'Detected Peaks (n={len(coord_peaks)})')
     axes[0, 1].axis('off')
-    
+
     # Bottom-left: Peak intensity histogram
-    if peaks.size > 0:
-        intensities = prob_map[peaks[:, 0], peaks[:, 1]]
+    if coord_peaks.size > 0:
+        intensities = prob_map[coord_peaks[:, 0], coord_peaks[:, 1]]
         axes[1, 0].hist(intensities, bins=30, alpha=0.7, edgecolor='black')
-        axes[1, 0].axvline(np.mean(intensities), color='red', linestyle='--', 
+        axes[1, 0].axvline(np.mean(intensities), color='red', linestyle='--',
                           label=f'Mean: {np.mean(intensities):.3f}')
         axes[1, 0].set_xlabel('Peak Intensity')
         axes[1, 0].set_ylabel('Count')
@@ -8484,26 +8499,26 @@ def create_detection_visualization(prob_map: np.ndarray, peaks: np.ndarray, base
     else:
         axes[1, 0].text(0.5, 0.5, 'No peaks detected', ha='center', va='center')
         axes[1, 0].set_title('Peak Intensity Distribution')
-    
+
     # Bottom-right: Spatial distribution
     axes[1, 1].imshow(bg_img, cmap='gray', alpha=0.5)
-    if peaks.size > 0:
+    if coord_peaks.size > 0:
         # Create density map
         from scipy.stats import gaussian_kde
-        if len(peaks) > 1:
+        if len(coord_peaks) > 1:
             try:
-                kde = gaussian_kde(peaks.T)
+                kde = gaussian_kde(coord_peaks[:, :2].T)
                 y, x = np.mgrid[0:prob_map.shape[0]:50j, 0:prob_map.shape[1]:50j]
                 positions = np.vstack([x.ravel(), y.ravel()])
                 density = kde(positions).reshape(x.shape)
-                
+
                 contour = axes[1, 1].contour(x, y, density, levels=5, alpha=0.7, cmap='Reds')
                 axes[1, 1].clabel(contour, inline=True, fontsize=8)
             except:
                 pass  # Skip density plot if it fails
-        
-        axes[1, 1].scatter(peaks[:, 1], peaks[:, 0], c='red', s=10, alpha=0.8)
-    
+
+        axes[1, 1].scatter(coord_peaks[:, 1], coord_peaks[:, 0], c='red', s=10, alpha=0.8)
+
     axes[1, 1].set_title('Spatial Distribution with Density Contours')
     axes[1, 1].axis('off')
     
@@ -8518,7 +8533,15 @@ def create_detection_visualization(prob_map: np.ndarray, peaks: np.ndarray, base
 def assign_peaks_to_regions(peaks, labeled_mask, valid_regions):
     """Assign detected peaks to their corresponding region with improved accuracy."""
     from matplotlib.path import Path
-    
+
+    peaks = np.asarray(peaks)
+    if peaks.size == 0:
+        coord_peaks = np.empty((0, 2), dtype=int)
+    else:
+        if peaks.ndim == 1:
+            peaks = peaks.reshape(1, -1)
+        coord_peaks = np.asarray(peaks[:, :2], dtype=int)
+
     region_polygons = {}
     for region in valid_regions:
         label_val = region.label
@@ -8538,30 +8561,33 @@ def assign_peaks_to_regions(peaks, labeled_mask, valid_regions):
     region_peaks_dict = {region.label: [] for region in valid_regions}
     unassigned_peaks = []
     
-    for peak in peaks:
-        r, c = peak
+    for peak in coord_peaks:
+        r, c = map(int, peak[:2])
         # First, try direct mask lookup
         region_label = labeled_mask[r, c]
         if region_label != 0 and region_label in region_peaks_dict:
-            region_peaks_dict[region_label].append(peak)
+            region_peaks_dict[region_label].append(np.array([r, c], dtype=int))
         else:
             # Fall back to polygon containment check
             assigned = False
             for label_val, path in region_polygons.items():
                 if path is not None and path.contains_point((c, r)):
-                    region_peaks_dict[label_val].append(peak)
+                    region_peaks_dict[label_val].append(np.array([r, c], dtype=int))
                     assigned = True
                     break
             if not assigned:
-                unassigned_peaks.append(peak)
+                unassigned_peaks.append(np.array([r, c], dtype=int))
     
     if unassigned_peaks:
         logger.warning(f"{len(unassigned_peaks)} peaks could not be assigned to regions")
     
     # Convert lists to arrays
     for label_val in region_peaks_dict:
-        region_peaks_dict[label_val] = np.array(region_peaks_dict[label_val])
-    
+        if region_peaks_dict[label_val]:
+            region_peaks_dict[label_val] = np.array(region_peaks_dict[label_val], dtype=int)
+        else:
+            region_peaks_dict[label_val] = np.empty((0, 2), dtype=int)
+
     return region_peaks_dict
 
 def voronoi_average_cell_stats(region, region_peaks, cfg=CONFIG):
