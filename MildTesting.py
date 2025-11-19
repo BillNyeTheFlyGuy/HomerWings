@@ -1186,6 +1186,44 @@ class TrichomeAnalysisGUI:
                 pass  # Window might already be destroyed
             except Exception as e:
                 logger.warning(f"Error closing loading overlay: {e}")
+
+    def start_dapi_pipeline(self):
+        """Run the DAPI nuclei pipeline from the GUI context."""
+        input_root = self.master_folder_var.get().strip()
+        output_root = self.output_folder_var.get().strip() or input_root
+
+        if not input_root:
+            messagebox.showerror("Error", "Please select a master folder for DAPI processing")
+            return
+
+        disable_large_output = self.disable_large_output_var.get()
+        self.is_processing = True
+        self.dapi_button.config(state=tk.DISABLED)
+        self.progress_var.set("Running DAPI nuclei pipeline...")
+
+        def worker():
+            try:
+                from dapi_nuclei_pipeline import DapiNucleiPipelineConfig, run_dapi_nuclei_pipeline
+
+                cfg = DapiNucleiPipelineConfig(
+                    input_root=Path(input_root),
+                    output_root=Path(output_root),
+                    large_output_enabled=not disable_large_output,
+                )
+                results = run_dapi_nuclei_pipeline(cfg)
+                message = f"DAPI pipeline complete for {len(results)} experiments (outputs in {output_root})"
+            except Exception as exc:
+                logger.error("DAPI pipeline failed: %s", exc, exc_info=True)
+                message = f"DAPI pipeline failed: {exc}"
+
+            def finalize():
+                self.progress_var.set(message)
+                self.dapi_button.config(state=tk.NORMAL)
+                self.is_processing = False
+
+            self.root.after(0, finalize)
+
+        threading.Thread(target=worker, daemon=True).start()
     
     def start_processing(self):
         """Fixed start processing with better Windows error handling"""
@@ -1441,9 +1479,16 @@ class TrichomeAnalysisGUI:
         # Additional options
         self.skip_existing_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options_frame, text="Skip folders with existing results", variable=self.skip_existing_var).pack(anchor=tk.W, pady=2)
-        
+
         self.save_config_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(options_frame, text="Save configuration with results", variable=self.save_config_var).pack(anchor=tk.W, pady=2)
+
+        self.disable_large_output_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            options_frame,
+            text="Disable large DAPI outputs (modal slice only)",
+            variable=self.disable_large_output_var,
+        ).pack(anchor=tk.W, pady=2)
         
         # Folder preview
         preview_frame = ttk.LabelFrame(self.processing_frame, text="Detected Subfolders", padding=10)
@@ -1455,14 +1500,21 @@ class TrichomeAnalysisGUI:
         
         self.folder_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
+
         # Control buttons
         control_frame = ttk.Frame(self.processing_frame)
         control_frame.pack(fill=tk.X, padx=10, pady=10)
-        
+
         self.refresh_button = ttk.Button(control_frame, text="Refresh Folder List", command=self.refresh_folder_list)
         self.refresh_button.pack(side=tk.LEFT)
-        
+
+        self.dapi_button = ttk.Button(
+            control_frame,
+            text="Run DAPI Nuclei Pipeline",
+            command=self.start_dapi_pipeline,
+        )
+        self.dapi_button.pack(side=tk.LEFT, padx=(10, 0))
+
         self.start_button = ttk.Button(control_frame, text="Start Processing", command=self.start_processing)
         self.start_button.pack(side=tk.RIGHT, padx=(0,10))
         
@@ -7934,10 +7986,16 @@ def main(directory: str, cfg: TrichomeDetectionConfig = CONFIG,
 if __name__ == "__main__":
     # Ensure Windows compatibility
     ensure_windows_compatibility()
-    
+
     # Check if GUI should be launched
     import sys
-    
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--dapi-pipeline":
+        from dapi_nuclei_pipeline import run_dapi_pipeline_cli
+
+        run_dapi_pipeline_cli(sys.argv[2:])
+        sys.exit(0)
+
     if len(sys.argv) > 1 and sys.argv[1] == "--cli":
         # Command line mode for backwards compatibility
         root = tk.Tk()
