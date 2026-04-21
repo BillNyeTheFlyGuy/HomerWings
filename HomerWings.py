@@ -33,11 +33,10 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import threading
 import queue
+from collections import deque
 import json
 import base64
-from pathlib import Path
 from dataclasses import asdict
-import time
 from skimage import exposure, morphology, filters, feature, measure, segmentation
 from skimage.morphology import white_tophat, disk, remove_small_objects, dilation, erosion, skeletonize
 from skimage.filters import threshold_local, gaussian, frangi, sato
@@ -49,8 +48,6 @@ from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
 from scipy import ndimage
 from PIL import Image, ImageTk
-import tkinter as tk
-from tkinter import filedialog, messagebox
 import matplotlib
 import drosophila_gif
 matplotlib.use('Agg')
@@ -149,6 +146,9 @@ class TrichomeDetectionConfig:
     
     # === NEW: Force merge regions 4+5 ===
     force_merge_regions_4_5: bool = False
+    
+    # Debug/diagnostic output control
+    save_debug_visualizations: bool = False
     
     def validate(self) -> None:
         """Enhanced validation including hybrid parameters."""
@@ -590,8 +590,8 @@ class StringRemovalTrichomeFilter:
         # Parameters for string detection and removal
         self.connection_distance = 25     # Max distance to consider trichomes "connected"
         self.min_string_length = 8       # Min number of trichomes to be considered a "string"
-        self.max_string_width = 50       # Max width of valid string (bubbles are very thin)
-        self.linearity_threshold = 0.7   # How linear a string must be to be removed (0-1)
+        self.max_string_width = 10       # Max width of valid string (bubbles are very thin)
+        self.linearity_threshold = 0.9   # How linear a string must be to be removed (0-1)
         
     def remove_trichome_strings(self, peaks, image_shape):
         """Remove long, thin strings of trichomes that represent bubble artifacts."""
@@ -647,10 +647,10 @@ class StringRemovalTrichomeFilter:
                 
             # BFS to find all connected nodes
             component = []
-            queue = [start_node]
+            queue = deque([start_node])
             
             while queue:
-                node = queue.pop(0)
+                node = queue.popleft()
                 if visited[node]:
                     continue
                     
@@ -929,321 +929,6 @@ class EnhancedStringRemovalFilter(StringRemovalTrichomeFilter):
         else:
             # Standard string removal for dense wings
             return self.remove_trichome_strings(peaks, image_shape)
-
-class StringRemovalTrichomeFilter:
-    """Remove long strings of trichomes (bubble artifacts) using morphological-like operations."""
-    
-    def __init__(self, config):
-        self.config = config
-        # Parameters for string detection and removal
-        self.connection_distance = 25     # Max distance to consider trichomes "connected"
-        self.min_string_length = 8       # Min number of trichomes to be considered a "string"
-        self.max_string_width = 10       # Max width of valid string (bubbles are very thin)
-        self.linearity_threshold = 0.9   # How linear a string must be to be removed (0-1)
-        
-    def remove_trichome_strings(self, peaks, image_shape):
-        """Remove long, thin strings of trichomes that represent bubble artifacts."""
-        
-        if len(peaks) < 20:
-            print("Too few trichomes for string filtering")
-            return peaks
-            
-        print(f"Filtering strings from {len(peaks)} trichomes...")
-        
-        # Step 1: Build connectivity graph between nearby trichomes
-        adjacency_graph = self._build_trichome_graph(peaks)
-        
-        # Step 2: Find connected components (chains/strings)
-        components = self._find_connected_components(adjacency_graph)
-        
-        # Step 3: Identify which components are "strings" vs "blobs"
-        string_components = self._identify_string_components(peaks, components)
-        
-        # Step 4: Remove trichomes that belong to string components
-        filtered_peaks = self._remove_string_trichomes(peaks, string_components)
-        
-        removed_count = len(peaks) - len(filtered_peaks)
-        print(f"  Removed {removed_count} trichomes from {len(string_components)} string artifacts")
-        print(f"  Remaining: {len(filtered_peaks)} trichomes")
-        
-        return filtered_peaks
-    
-    def _build_trichome_graph(self, peaks):
-        """Build graph of connected trichomes based on distance."""
-        n_peaks = len(peaks)
-        
-        # Calculate pairwise distances
-        distances = squareform(pdist(peaks))
-        
-        # Create adjacency matrix
-        adjacency = distances <= self.connection_distance
-        
-        # Remove self-connections
-        np.fill_diagonal(adjacency, False)
-        
-        return adjacency
-    
-    def _find_connected_components(self, adjacency_graph):
-        """Find connected components in the trichome graph."""
-        n_nodes = adjacency_graph.shape[0]
-        visited = np.zeros(n_nodes, dtype=bool)
-        components = []
-        
-        for start_node in range(n_nodes):
-            if visited[start_node]:
-                continue
-                
-            # BFS to find all connected nodes
-            component = []
-            queue = [start_node]
-            
-            while queue:
-                node = queue.pop(0)
-                if visited[node]:
-                    continue
-                    
-                visited[node] = True
-                component.append(node)
-                
-                # Add unvisited neighbors to queue
-                neighbors = np.where(adjacency_graph[node])[0]
-                for neighbor in neighbors:
-                    if not visited[neighbor]:
-                        queue.append(neighbor)
-            
-            if len(component) > 1:  # Only keep components with multiple trichomes
-                components.append(component)
-        
-        return components
-    
-    def _identify_string_components(self, peaks, components):
-        """Identify which components are long strings vs compact blobs."""
-        string_components = []
-        
-        for i, component in enumerate(components):
-            if len(component) < self.min_string_length:
-                continue  # Too short to be a problematic string
-            
-            component_peaks = peaks[component]
-            
-            # Calculate component geometry
-            is_string = self._is_linear_string(component_peaks)
-            
-            if is_string:
-                string_components.append(component)
-                print(f"    String {len(string_components)}: {len(component)} trichomes")
-            else:
-                print(f"    Blob {i}: {len(component)} trichomes (kept)")
-        
-        return string_components
-    
-    def _is_linear_string(self, component_peaks):
-        """Check if a component is a linear string (bubble artifact)."""
-        
-        if len(component_peaks) < 3:
-            return False
-        
-        # Method 1: Check aspect ratio of bounding box
-        min_coords = np.min(component_peaks, axis=0)
-        max_coords = np.max(component_peaks, axis=0)
-        bbox_dims = max_coords - min_coords
-        
-        if bbox_dims[0] > 0 and bbox_dims[1] > 0:
-            aspect_ratio = max(bbox_dims) / min(bbox_dims)
-            
-            # Very elongated = likely string
-            if aspect_ratio > 8.0:
-                return True
-        
-        # Method 2: Check linearity using PCA
-        try:
-            # Center the points
-            centered = component_peaks - np.mean(component_peaks, axis=0)
-            
-            # Compute covariance matrix
-            cov_matrix = np.cov(centered.T)
-            
-            # Get eigenvalues
-            eigenvalues = np.linalg.eigvals(cov_matrix)
-            eigenvalues = np.sort(eigenvalues)[::-1]  # Sort descending
-            
-            # Linearity measure: ratio of largest to smallest eigenvalue
-            if eigenvalues[1] > 0:
-                linearity = eigenvalues[0] / eigenvalues[1]
-                
-                # High linearity = string-like
-                if linearity > 15.0:
-                    return True
-        except:
-            pass  # Skip if PCA fails
-        
-        # Method 3: Check "width" of the string
-        if len(component_peaks) >= 4:
-            # Fit a line through the points and measure perpendicular distances
-            try:
-                # Simple line fitting using first and last points
-                start_point = component_peaks[0]
-                end_point = component_peaks[-1]
-                
-                # Vector along the line
-                line_vector = end_point - start_point
-                line_length = np.linalg.norm(line_vector)
-                
-                if line_length > 0:
-                    line_unit = line_vector / line_length
-                    
-                    # Calculate perpendicular distances
-                    perp_distances = []
-                    for point in component_peaks:
-                        to_point = point - start_point
-                        # Project onto line
-                        projection_length = np.dot(to_point, line_unit)
-                        projection = start_point + projection_length * line_unit
-                        # Perpendicular distance
-                        perp_dist = np.linalg.norm(point - projection)
-                        perp_distances.append(perp_dist)
-                    
-                    # If most points are very close to the line = string
-                    max_width = np.max(perp_distances)
-                    
-                    if max_width < self.max_string_width and line_length > 100:
-                        return True
-            except:
-                pass
-        
-        return False
-    
-    def _remove_string_trichomes(self, peaks, string_components):
-        """Remove trichomes that belong to string components."""
-        
-        # Flatten list of string indices
-        string_indices = set()
-        for component in string_components:
-            string_indices.update(component)
-        
-        # Keep trichomes that are NOT in string components
-        keep_mask = np.array([i not in string_indices for i in range(len(peaks))])
-        filtered_peaks = peaks[keep_mask]
-        
-        return filtered_peaks
-    
-    def create_wing_mask_simple(self, filtered_peaks, image_shape):
-        """Create wing mask from filtered trichomes using simple approach."""
-        
-        if len(filtered_peaks) < 10:
-            print("Too few filtered trichomes")
-            return None
-        
-        print(f"Creating wing mask from {len(filtered_peaks)} filtered trichomes...")
-        
-        # Method: Dense region growing
-        density_map = np.zeros(image_shape, dtype=np.float32)
-        
-        # Add gaussian blob at each trichome
-        sigma = 12  # Smoothing radius
-        for peak in filtered_peaks:
-            y, x = peak
-            
-            # Add gaussian contribution
-            radius = int(3 * sigma)
-            y_min, y_max = max(0, y-radius), min(image_shape[0], y+radius+1)
-            x_min, x_max = max(0, x-radius), min(image_shape[1], x+radius+1)
-            
-            if y_max > y_min and x_max > x_min:
-                yy, xx = np.mgrid[y_min:y_max, x_min:x_max]
-                gaussian = np.exp(-((yy-y)**2 + (xx-x)**2) / (2*sigma**2))
-                density_map[y_min:y_max, x_min:x_max] += gaussian
-        
-        # Smooth the density map
-        density_map = ndimage.gaussian_filter(density_map, sigma=3)
-        
-        # Threshold to get wing regions
-        threshold = np.percentile(density_map[density_map > 0], 20)  # Keep top 80%
-        wing_mask = density_map > threshold
-        
-        # Clean up
-        wing_mask = morphology.closing(wing_mask, morphology.disk(8))
-        wing_mask = morphology.remove_small_holes(wing_mask, area_threshold=10000)
-        wing_mask = morphology.remove_small_objects(wing_mask, min_size=20000)
-        
-        # Keep largest component
-        labeled = measure.label(wing_mask)
-        if labeled.max() > 0:
-            regions = measure.regionprops(labeled)
-            largest = max(regions, key=lambda r: r.area)
-            wing_mask = labeled == largest.label
-        
-        print(f"  Wing mask: {np.sum(wing_mask)} pixels")
-        return wing_mask
-    
-    def visualize_string_removal(self, original_peaks, filtered_peaks, removed_peaks, 
-                                wing_mask, prob_map, raw_img, output_path):
-        """Visualize the string removal process."""
-        
-        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-        
-        bg_img = raw_img if raw_img is not None else prob_map[..., 0]
-        
-        # Top row: filtering process
-        axes[0, 0].imshow(bg_img, cmap='gray')
-        if len(original_peaks) > 0:
-            axes[0, 0].scatter(original_peaks[:, 1], original_peaks[:, 0], 
-                             c='red', s=1, alpha=0.6)
-        axes[0, 0].set_title(f'All Detected Trichomes (n={len(original_peaks)})')
-        axes[0, 0].axis('off')
-        
-        # Show removed strings
-        axes[0, 1].imshow(bg_img, cmap='gray')
-        if len(removed_peaks) > 0:
-            axes[0, 1].scatter(removed_peaks[:, 1], removed_peaks[:, 0], 
-                             c='red', s=3, alpha=0.8)
-        axes[0, 1].set_title(f'Removed String Artifacts (n={len(removed_peaks)})')
-        axes[0, 1].axis('off')
-        
-        # Show kept trichomes
-        axes[0, 2].imshow(bg_img, cmap='gray')
-        if len(filtered_peaks) > 0:
-            axes[0, 2].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], 
-                             c='blue', s=2, alpha=0.8)
-        axes[0, 2].set_title(f'Kept Trichomes (n={len(filtered_peaks)})')
-        axes[0, 2].axis('off')
-        
-        # Bottom row: results
-        if wing_mask is not None:
-            axes[1, 0].imshow(wing_mask, cmap='viridis')
-            axes[1, 0].set_title(f'String-Filtered Wing Mask')
-        else:
-            axes[1, 0].text(0.5, 0.5, 'Wing mask failed', ha='center', va='center')
-            axes[1, 0].set_title('Wing Mask (Failed)')
-        axes[1, 0].axis('off')
-        
-        # Show comparison: before vs after
-        axes[1, 1].imshow(bg_img, cmap='gray')
-        if len(original_peaks) > 0:
-            axes[1, 1].scatter(original_peaks[:, 1], original_peaks[:, 0], 
-                             c='red', s=1, alpha=0.3, label='Original')
-        if len(filtered_peaks) > 0:
-            axes[1, 1].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], 
-                             c='blue', s=2, alpha=0.8, label='Filtered')
-        axes[1, 1].legend()
-        axes[1, 1].set_title('Before vs After Filtering')
-        axes[1, 1].axis('off')
-        
-        # Final result
-        axes[1, 2].imshow(bg_img, cmap='gray')
-        if wing_mask is not None:
-            axes[1, 2].imshow(wing_mask, cmap='Blues', alpha=0.4)
-        if len(filtered_peaks) > 0:
-            axes[1, 2].scatter(filtered_peaks[:, 1], filtered_peaks[:, 0], 
-                             c='yellow', s=1, alpha=0.8)
-        axes[1, 2].set_title('Final Wing Boundary')
-        axes[1, 2].axis('off')
-        
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
-        plt.close()
-        
-        print(f"Saved string removal visualization to {output_path}")
 
 
 
@@ -1600,6 +1285,8 @@ class TrichomeAnalysisGUI:
         
         self.create_config_checkbox(merge_frame, "force_merge_regions_4_5", 
                                     "Force merge regions 4+5 (even when detected separately)", True)
+        self.create_config_checkbox(merge_frame, "save_debug_visualizations",
+                                    "Save debug visualizations (slower, optional)", False)
         
         ttk.Label(merge_frame, text="Note: Merge mode overrides normal 5-region detection.", 
                  font=('TkDefaultFont', 8, 'italic')).pack(anchor=tk.W, pady=(5,0))
@@ -5150,7 +4837,8 @@ def main_with_hybrid_wing_detection(directory: str, cfg: TrichomeDetectionConfig
                 
                 result = enhanced_intervein_processing_with_hybrid_wing_detection(
                     full_prob, raw_img, cfg, output_directory, basename, 
-                    force_pentagone=force_pentagone_mode
+                    force_pentagone=force_pentagone_mode,
+                    peaks=peaks
                 )
                 
                 if result[0] is None:
@@ -6579,11 +6267,11 @@ class ImprovedWingVeinDetector:
     def _trace_branch_length(self, skeleton, y, x, max_length=50):
         """Trace branch length from endpoint."""
         visited = set()
-        queue = [(y, x)]
+        queue = deque([(y, x)])
         length = 0
         
         while queue and length < max_length:
-            cy, cx = queue.pop(0)
+            cy, cx = queue.popleft()
             
             if (cy, cx) in visited:
                 continue
@@ -6617,11 +6305,11 @@ class ImprovedWingVeinDetector:
     def _remove_branch(self, skeleton, y, x, max_length):
         """Remove a branch starting from endpoint."""
         visited = set()
-        queue = [(y, x)]
+        queue = deque([(y, x)])
         removed = 0
         
         while queue and removed < max_length:
-            cy, cx = queue.pop(0)
+            cy, cx = queue.popleft()
             
             if (cy, cx) in visited:
                 continue
@@ -7360,16 +7048,17 @@ class ImprovedRegionDetector:
 # REPLACE: Add this complete function after your existing processing functions
 
 def enhanced_intervein_processing_with_hybrid_wing_detection(prob_map, raw_img, cfg, output_dir, basename, 
-                                                           force_pentagone=False):
+                                                           force_pentagone=False, peaks=None):
     """Enhanced processing using hybrid wing detection (probability + trichome validation)."""
     
     logger.info("Starting enhanced processing with hybrid wing detection...")
     
-    # Step 1: Detect trichomes FIRST
-    tri_prob = prob_map[..., 0] if prob_map.shape[-1] >= 1 else prob_map
-    peaks, metrics = detect_trichome_peaks(tri_prob, cfg)
+    # Step 1: Use provided trichomes if available, otherwise detect once here
+    if peaks is None:
+        tri_prob = prob_map[..., 0] if prob_map.shape[-1] >= 1 else prob_map
+        peaks, _ = detect_trichome_peaks(tri_prob, cfg)
     
-    logger.info(f"Detected {len(peaks)} trichomes for analysis")
+    logger.info(f"Using {len(peaks)} trichomes for analysis")
     
     # Step 2: Detect veins (can be done in parallel)
     # vein_detector = ImprovedWingVeinDetector(cfg)
@@ -7381,12 +7070,13 @@ def enhanced_intervein_processing_with_hybrid_wing_detection(prob_map, raw_img, 
     hybrid_detector = HybridWingDetector(cfg)
     wing_mask = hybrid_detector.detect_wing_boundary_hybrid(prob_map, raw_img, peaks)
     
-    # Step 4: Create comparison visualization for debugging
-    prob_only_mask = hybrid_detector._detect_from_probability_enhanced(prob_map, raw_img)
-    comparison_path = os.path.join(output_dir, f"{basename}_wing_detection_comparison.png")
-    hybrid_detector.create_detection_comparison_visualization(
-        prob_map, raw_img, peaks, prob_only_mask, wing_mask, comparison_path
-    )
+    # Step 4: Create comparison visualization for debugging (optional)
+    if cfg.save_debug_visualizations:
+        prob_only_mask = hybrid_detector._detect_from_probability_enhanced(prob_map, raw_img)
+        comparison_path = os.path.join(output_dir, f"{basename}_wing_detection_comparison.png")
+        hybrid_detector.create_detection_comparison_visualization(
+            prob_map, raw_img, peaks, prob_only_mask, wing_mask, comparison_path
+        )
     
     # Step 5: Validate wing
     if not WingBorderChecker.is_valid_wing(wing_mask, cfg.min_wing_area, cfg.border_buffer):
@@ -7419,12 +7109,13 @@ def enhanced_intervein_processing_with_hybrid_wing_detection(prob_map, raw_img, 
     intervein_mask = morphology.remove_small_holes(intervein_mask, area_threshold=5000)
     labeled_regions = label(intervein_mask)
     filtered_labeled_mask = intervein_detector._filter_intervein_regions(labeled_regions, wing_mask)
-    logger.info("Creating pre-labeling debug visualization...")
-    create_pre_labeling_debug_visualization(
-        filtered_labeled_mask, wing_mask, prob_map, raw_img,
-        output_dir, basename,
-        mode_name="merge" if cfg.force_merge_regions_4_5 else "normal"
-    )
+    if cfg.save_debug_visualizations:
+        logger.info("Creating pre-labeling debug visualization...")
+        create_pre_labeling_debug_visualization(
+            filtered_labeled_mask, wing_mask, prob_map, raw_img,
+            output_dir, basename,
+            mode_name="merge" if cfg.force_merge_regions_4_5 else "normal"
+        )
     
     # Step 8: Apply anatomical labeling with pentagone detection
     if force_pentagone:
