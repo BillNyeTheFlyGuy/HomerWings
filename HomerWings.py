@@ -33,6 +33,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import threading
 import queue
+from collections import deque
 import json
 import base64
 from dataclasses import asdict
@@ -145,6 +146,9 @@ class TrichomeDetectionConfig:
     
     # === NEW: Force merge regions 4+5 ===
     force_merge_regions_4_5: bool = False
+    
+    # Debug/diagnostic output control
+    save_debug_visualizations: bool = False
     
     def validate(self) -> None:
         """Enhanced validation including hybrid parameters."""
@@ -643,10 +647,10 @@ class StringRemovalTrichomeFilter:
                 
             # BFS to find all connected nodes
             component = []
-            queue = [start_node]
+            queue = deque([start_node])
             
             while queue:
-                node = queue.pop(0)
+                node = queue.popleft()
                 if visited[node]:
                     continue
                     
@@ -1281,6 +1285,8 @@ class TrichomeAnalysisGUI:
         
         self.create_config_checkbox(merge_frame, "force_merge_regions_4_5", 
                                     "Force merge regions 4+5 (even when detected separately)", True)
+        self.create_config_checkbox(merge_frame, "save_debug_visualizations",
+                                    "Save debug visualizations (slower, optional)", False)
         
         ttk.Label(merge_frame, text="Note: Merge mode overrides normal 5-region detection.", 
                  font=('TkDefaultFont', 8, 'italic')).pack(anchor=tk.W, pady=(5,0))
@@ -4831,7 +4837,8 @@ def main_with_hybrid_wing_detection(directory: str, cfg: TrichomeDetectionConfig
                 
                 result = enhanced_intervein_processing_with_hybrid_wing_detection(
                     full_prob, raw_img, cfg, output_directory, basename, 
-                    force_pentagone=force_pentagone_mode
+                    force_pentagone=force_pentagone_mode,
+                    peaks=peaks
                 )
                 
                 if result[0] is None:
@@ -6260,11 +6267,11 @@ class ImprovedWingVeinDetector:
     def _trace_branch_length(self, skeleton, y, x, max_length=50):
         """Trace branch length from endpoint."""
         visited = set()
-        queue = [(y, x)]
+        queue = deque([(y, x)])
         length = 0
         
         while queue and length < max_length:
-            cy, cx = queue.pop(0)
+            cy, cx = queue.popleft()
             
             if (cy, cx) in visited:
                 continue
@@ -6298,11 +6305,11 @@ class ImprovedWingVeinDetector:
     def _remove_branch(self, skeleton, y, x, max_length):
         """Remove a branch starting from endpoint."""
         visited = set()
-        queue = [(y, x)]
+        queue = deque([(y, x)])
         removed = 0
         
         while queue and removed < max_length:
-            cy, cx = queue.pop(0)
+            cy, cx = queue.popleft()
             
             if (cy, cx) in visited:
                 continue
@@ -7041,16 +7048,17 @@ class ImprovedRegionDetector:
 # REPLACE: Add this complete function after your existing processing functions
 
 def enhanced_intervein_processing_with_hybrid_wing_detection(prob_map, raw_img, cfg, output_dir, basename, 
-                                                           force_pentagone=False):
+                                                           force_pentagone=False, peaks=None):
     """Enhanced processing using hybrid wing detection (probability + trichome validation)."""
     
     logger.info("Starting enhanced processing with hybrid wing detection...")
     
-    # Step 1: Detect trichomes FIRST
-    tri_prob = prob_map[..., 0] if prob_map.shape[-1] >= 1 else prob_map
-    peaks, metrics = detect_trichome_peaks(tri_prob, cfg)
+    # Step 1: Use provided trichomes if available, otherwise detect once here
+    if peaks is None:
+        tri_prob = prob_map[..., 0] if prob_map.shape[-1] >= 1 else prob_map
+        peaks, _ = detect_trichome_peaks(tri_prob, cfg)
     
-    logger.info(f"Detected {len(peaks)} trichomes for analysis")
+    logger.info(f"Using {len(peaks)} trichomes for analysis")
     
     # Step 2: Detect veins (can be done in parallel)
     # vein_detector = ImprovedWingVeinDetector(cfg)
@@ -7062,12 +7070,13 @@ def enhanced_intervein_processing_with_hybrid_wing_detection(prob_map, raw_img, 
     hybrid_detector = HybridWingDetector(cfg)
     wing_mask = hybrid_detector.detect_wing_boundary_hybrid(prob_map, raw_img, peaks)
     
-    # Step 4: Create comparison visualization for debugging
-    prob_only_mask = hybrid_detector._detect_from_probability_enhanced(prob_map, raw_img)
-    comparison_path = os.path.join(output_dir, f"{basename}_wing_detection_comparison.png")
-    hybrid_detector.create_detection_comparison_visualization(
-        prob_map, raw_img, peaks, prob_only_mask, wing_mask, comparison_path
-    )
+    # Step 4: Create comparison visualization for debugging (optional)
+    if cfg.save_debug_visualizations:
+        prob_only_mask = hybrid_detector._detect_from_probability_enhanced(prob_map, raw_img)
+        comparison_path = os.path.join(output_dir, f"{basename}_wing_detection_comparison.png")
+        hybrid_detector.create_detection_comparison_visualization(
+            prob_map, raw_img, peaks, prob_only_mask, wing_mask, comparison_path
+        )
     
     # Step 5: Validate wing
     if not WingBorderChecker.is_valid_wing(wing_mask, cfg.min_wing_area, cfg.border_buffer):
@@ -7100,12 +7109,13 @@ def enhanced_intervein_processing_with_hybrid_wing_detection(prob_map, raw_img, 
     intervein_mask = morphology.remove_small_holes(intervein_mask, area_threshold=5000)
     labeled_regions = label(intervein_mask)
     filtered_labeled_mask = intervein_detector._filter_intervein_regions(labeled_regions, wing_mask)
-    logger.info("Creating pre-labeling debug visualization...")
-    create_pre_labeling_debug_visualization(
-        filtered_labeled_mask, wing_mask, prob_map, raw_img,
-        output_dir, basename,
-        mode_name="merge" if cfg.force_merge_regions_4_5 else "normal"
-    )
+    if cfg.save_debug_visualizations:
+        logger.info("Creating pre-labeling debug visualization...")
+        create_pre_labeling_debug_visualization(
+            filtered_labeled_mask, wing_mask, prob_map, raw_img,
+            output_dir, basename,
+            mode_name="merge" if cfg.force_merge_regions_4_5 else "normal"
+        )
     
     # Step 8: Apply anatomical labeling with pentagone detection
     if force_pentagone:
