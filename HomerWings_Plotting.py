@@ -926,6 +926,17 @@ class HomerwingsDataAnalyzer:
                     print(f"No data for {filename_base} at {temp_label}")
                     continue
 
+                figure_values = df_metric[metric_col].dropna()
+                if figure_values.nunique() > 1:
+                    bin_count = min(16, max(6, int(np.sqrt(len(figure_values))) + 2))
+                    bins = np.histogram_bin_edges(figure_values, bins=bin_count)
+                    x_min, x_max = float(bins[0]), float(bins[-1])
+                else:
+                    value = float(figure_values.iloc[0])
+                    pad = abs(value) * 0.05 if value != 0 else 1.0
+                    bins = np.linspace(value - pad, value + pad, 6)
+                    x_min, x_max = float(bins[0]), float(bins[-1])
+
                 fig, axes = plt.subplots(
                     nrows,
                     ncols,
@@ -947,14 +958,6 @@ class HomerwingsDataAnalyzer:
                     if values_all.empty:
                         ax.set_visible(False)
                         continue
-
-                    if values_all.nunique() > 1:
-                        bin_count = min(12, max(5, int(np.sqrt(len(values_all))) + 2))
-                        bins = np.histogram_bin_edges(values_all, bins=bin_count)
-                    else:
-                        value = float(values_all.iloc[0])
-                        pad = abs(value) * 0.05 if value != 0 else 1.0
-                        bins = np.linspace(value - pad, value + pad, 6)
 
                     sexes = sorted(df_mutation["sex"].dropna().unique())
                     for sex_index, sex in enumerate(sexes):
@@ -979,6 +982,7 @@ class HomerwingsDataAnalyzer:
                     ax.set_title(str(mutation), fontsize=11, fontweight="bold")
                     ax.set_xlabel(xlabel)
                     ax.set_ylabel("Wings")
+                    ax.set_xlim(x_min, x_max)
                     ax.legend(fontsize=8)
 
                 for unused_index in range(len(mutations), len(axes)):
