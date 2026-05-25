@@ -451,6 +451,7 @@ class HomerwingsDataAnalyzer:
 
         if plot_suite != "none":
             lines.append("- `plots/`")
+            lines.append("- `Temp_Individual_Histograms/`")
 
         manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"Run summary saved to: {manifest_path}")
@@ -867,6 +868,134 @@ class HomerwingsDataAnalyzer:
                 plt.close(fig)
                 print(f"Saved: {out}")
 
+    def plot_temp_individual_histograms(
+        self,
+        output_root: str | Path = "Temp_Individual_Histograms",
+    ):
+        import math
+        import matplotlib.pyplot as plt
+
+        self._configure_plot_style()
+        output_root = self._ensure_dir(output_root)
+
+        df = self.calculate_wing_metrics().copy()
+        df["temperature_numeric"] = pd.to_numeric(df["temperature"], errors="coerce")
+        df = df.dropna(subset=["mutation", "sex", "temperature_numeric"])
+        if df.empty:
+            print("No data available for temperature individual histograms")
+            return
+
+        metrics = [
+            (
+                "wing_avg_cell_area",
+                "Average Cell Area (um^2)",
+                "average_cell_area_histograms",
+            ),
+            (
+                "total_estimated_cells",
+                "Estimated Cell Number",
+                "cell_number_histograms",
+            ),
+            (
+                "wing_area_um2",
+                "Wing Area (um^2)",
+                "wing_area_histograms",
+            ),
+        ]
+
+        sex_colors = {
+            "Male": "#2563eb",
+            "Female": "#dc2626",
+        }
+        fallback_colors = ["#16a34a", "#9333ea", "#ea580c", "#0891b2"]
+
+        for temperature in sorted(df["temperature_numeric"].dropna().unique()):
+            df_temp = df[df["temperature_numeric"] == temperature].copy()
+            mutations = sorted(df_temp["mutation"].dropna().unique())
+            if not mutations:
+                continue
+
+            temp_label = f"{temperature:g}C"
+            temp_dir = self._ensure_dir(output_root / self._safe_filename(temp_label))
+            ncols = 2
+            nrows = max(1, math.ceil(len(mutations) / ncols))
+
+            for metric_col, xlabel, filename_base in metrics:
+                df_metric = df_temp.dropna(subset=[metric_col]).copy()
+                if df_metric.empty:
+                    print(f"No data for {filename_base} at {temp_label}")
+                    continue
+
+                fig, axes = plt.subplots(
+                    nrows,
+                    ncols,
+                    figsize=(7.2 * ncols, 4.8 * nrows),
+                    squeeze=False,
+                    constrained_layout=True,
+                )
+                axes = axes.flatten()
+
+                for panel_index, mutation in enumerate(mutations):
+                    ax = axes[panel_index]
+                    df_mutation = df_metric[df_metric["mutation"] == mutation].copy()
+
+                    if df_mutation.empty:
+                        ax.set_visible(False)
+                        continue
+
+                    values_all = df_mutation[metric_col].dropna()
+                    if values_all.empty:
+                        ax.set_visible(False)
+                        continue
+
+                    if values_all.nunique() > 1:
+                        bin_count = min(12, max(5, int(np.sqrt(len(values_all))) + 2))
+                        bins = np.histogram_bin_edges(values_all, bins=bin_count)
+                    else:
+                        value = float(values_all.iloc[0])
+                        pad = abs(value) * 0.05 if value != 0 else 1.0
+                        bins = np.linspace(value - pad, value + pad, 6)
+
+                    sexes = sorted(df_mutation["sex"].dropna().unique())
+                    for sex_index, sex in enumerate(sexes):
+                        values = df_mutation[df_mutation["sex"] == sex][metric_col].dropna()
+                        if values.empty:
+                            continue
+
+                        color = sex_colors.get(
+                            str(sex),
+                            fallback_colors[sex_index % len(fallback_colors)],
+                        )
+                        ax.hist(
+                            values,
+                            bins=bins,
+                            alpha=0.52,
+                            color=color,
+                            edgecolor="white",
+                            linewidth=0.7,
+                            label=f"{sex} (n={len(values)})",
+                        )
+
+                    ax.set_title(str(mutation), fontsize=11, fontweight="bold")
+                    ax.set_xlabel(xlabel)
+                    ax.set_ylabel("Wings")
+                    ax.legend(fontsize=8)
+
+                for unused_index in range(len(mutations), len(axes)):
+                    axes[unused_index].set_visible(False)
+
+                fig.suptitle(
+                    f"{xlabel} by Mutation at {temperature:g} C\n"
+                    "Male and female distributions overlaid",
+                    fontsize=14,
+                    fontweight="bold",
+                )
+
+                out = temp_dir / f"{filename_base}_{self._safe_filename(temp_label)}.png"
+                fig.savefig(out, dpi=300, bbox_inches="tight")
+                plt.close(fig)
+                print(f"Saved: {out}")
+
 
 def run_analysis(
     master_folder: str | Path,
@@ -893,6 +1022,9 @@ def run_analysis(
 
         if plot_suite == "full":
             analyzer.plot_size_relationships_with_fits(output_root=plots_root / "size_relationships")
+            analyzer.plot_temp_individual_histograms(
+                output_root=analyzer.output_root / "Temp_Individual_Histograms"
+            )
     else:
         print("Plot generation skipped.")
 

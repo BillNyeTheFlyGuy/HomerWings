@@ -86,3 +86,4 @@ Typical outputs:
 - `condition_summary.csv`: grouped condition means/SEM.
 - `RUN_SUMMARY.md`: short manifest for the run.
 - `plots/`: generated figures when plots are enabled.
+- `Temp_Individual_Histograms/`: per-temperature multipanel histograms, one panel per mutation with male/female overlaid.
