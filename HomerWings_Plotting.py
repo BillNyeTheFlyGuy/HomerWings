@@ -1,16 +1,62 @@
 from __future__ import annotations
 
+import argparse
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-from scipy import stats
+np = None
+pd = None
+stats = None
+
+
+# =============================================================================
+# EDIT THESE SETTINGS IF YOU WANT TO RUN THE SCRIPT DIRECTLY FROM YOUR EDITOR
+# =============================================================================
+
+# Folder containing condition folders named like: mutation_temperature_sex
+# Example: r"C:\Users\Arthu\OneDrive - The University of Liverpool\Transfers\Oregon_Results"
+MASTER_FOLDER = r"C:\path\to\Oregon_Results"
+
+# Leave as None to create:
+# <MASTER_FOLDER>\HomerWings_Analysis_Output\<timestamp>\
+OUTPUT_ROOT = None
+
+# Options:
+#   "full"  = CSVs + condition summary + all plots in this script
+#   "basic" = CSVs + condition summary + lighter starter plots
+#   "none"  = CSVs + condition summary only
+PLOT_SUITE = "full"
+
+
+def load_dependencies() -> None:
+    global np, pd, stats
+
+    if np is not None and pd is not None and stats is not None:
+        return
+
+    try:
+        import numpy as _np
+        import pandas as _pd
+        from scipy import stats as _stats
+    except ModuleNotFoundError as exc:
+        missing = exc.name
+        raise SystemExit(
+            f"Missing required package: {missing}\n"
+            "Install dependencies with:\n"
+            "  python -m pip install -r requirements.txt"
+        ) from exc
+
+    np = _np
+    pd = _pd
+    stats = _stats
 
 
 class HomerwingsDataAnalyzer:
     def __init__(self, master_folder: str | Path, output_root: str | Path | None = None):
+        load_dependencies()
+
         self.master_folder = Path(master_folder)
 
         if output_root is None:
@@ -820,3 +866,85 @@ class HomerwingsDataAnalyzer:
                 fig.savefig(out, bbox_inches="tight")
                 plt.close(fig)
                 print(f"Saved: {out}")
+
+
+def run_analysis(
+    master_folder: str | Path,
+    output_root: str | Path | None = None,
+    plot_suite: str = "full",
+) -> Path:
+    load_dependencies()
+
+    analyzer = HomerwingsDataAnalyzer(master_folder=master_folder, output_root=output_root)
+    analyzer.analyze()
+    analyzer.save_results()
+
+    enhanced = analyzer.calculate_wing_metrics()
+    enhanced_path = analyzer.output_root / "homerwings_analysis_results_with_calculations.csv"
+    enhanced.to_csv(enhanced_path, index=False)
+    print(f"Enhanced results saved to: {enhanced_path}")
+
+    analyzer.write_condition_summary()
+
+    if plot_suite in {"basic", "full"}:
+        plots_root = analyzer.output_root / "plots"
+        analyzer.plot_wing_area_binned_vs_temperature(output_dir=plots_root / "binned")
+        analyzer.plot_wing_area_vs_avg_cell_area_per_condition(output_dir=plots_root / "per_condition")
+
+        if plot_suite == "full":
+            analyzer.plot_size_relationships_with_fits(output_root=plots_root / "size_relationships")
+    else:
+        print("Plot generation skipped.")
+
+    analyzer.write_run_manifest(plot_suite=plot_suite)
+    print(f"\nDone. Everything saved under:\n{analyzer.output_root}")
+    return analyzer.output_root
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the standalone HomerWings plotting script. "
+            "This file is separate from HomerWings.py."
+        )
+    )
+    parser.add_argument(
+        "master_folder",
+        nargs="?",
+        default=MASTER_FOLDER,
+        help="Folder containing condition subfolders. Defaults to MASTER_FOLDER in this file.",
+    )
+    parser.add_argument(
+        "--output",
+        default=OUTPUT_ROOT,
+        help="Optional output folder. Defaults to OUTPUT_ROOT in this file.",
+    )
+    parser.add_argument(
+        "--plots",
+        choices=["none", "basic", "full"],
+        default=PLOT_SUITE,
+        help="Plot suite to generate. Defaults to PLOT_SUITE in this file.",
+    )
+    parser.add_argument(
+        "--data-only",
+        action="store_true",
+        help="Alias for --plots none.",
+    )
+    return parser
+
+
+if __name__ == "__main__":
+    args = build_parser().parse_args()
+    selected_plot_suite = "none" if args.data_only else args.plots
+
+    if not args.master_folder or args.master_folder == r"C:\path\to\Oregon_Results":
+        raise SystemExit(
+            "Please edit MASTER_FOLDER near the top of HomerWings_Plotting.py, "
+            "or pass the folder path on the command line."
+        )
+
+    run_analysis(
+        master_folder=args.master_folder,
+        output_root=args.output,
+        plot_suite=selected_plot_suite,
+    )
