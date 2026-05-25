@@ -384,6 +384,88 @@ class HomerwingsDataAnalyzer:
         df.to_csv(output_path, index=False)
         print(f"Results saved to: {output_path}")
 
+    def write_run_manifest(self, plot_suite: str = "basic") -> Path:
+        manifest_path = self.output_root / "RUN_SUMMARY.md"
+        df = self.get_dataframe()
+
+        lines = [
+            "# HomerWings Plotting Run",
+            "",
+            f"- Input folder: `{self.master_folder}`",
+            f"- Output folder: `{self.output_root}`",
+            f"- Wings processed: `{len(df)}`",
+            f"- Plot suite: `{plot_suite}`",
+            "",
+            "## Generated Files",
+            "",
+            "- `homerwings_analysis_results.csv`",
+            "- `homerwings_analysis_results_with_calculations.csv`",
+            "- `condition_summary.csv`",
+        ]
+
+        if plot_suite != "none":
+            lines.append("- `plots/`")
+
+        manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"Run summary saved to: {manifest_path}")
+        return manifest_path
+
+    def write_condition_summary(self, output_path: str | Path | None = None) -> Path:
+        df = self.calculate_wing_metrics().copy()
+        if output_path is None:
+            output_path = self.output_root / "condition_summary.csv"
+        else:
+            output_path = Path(output_path)
+
+        summary = (
+            df.groupby(["mutation", "temperature", "sex"], dropna=False)
+            .agg(
+                n=("wing_id", "count"),
+                wing_area_mean=("wing_area_um2", "mean"),
+                wing_area_sem=(
+                    "wing_area_um2",
+                    lambda x: stats.sem(x, nan_policy="omit") if len(x.dropna()) > 1 else np.nan,
+                ),
+                wing_avg_cell_area_mean=("wing_avg_cell_area", "mean"),
+                wing_avg_cell_area_sem=(
+                    "wing_avg_cell_area",
+                    lambda x: stats.sem(x, nan_policy="omit") if len(x.dropna()) > 1 else np.nan,
+                ),
+                total_estimated_cells_mean=("total_estimated_cells", "mean"),
+                total_estimated_cells_sem=(
+                    "total_estimated_cells",
+                    lambda x: stats.sem(x, nan_policy="omit") if len(x.dropna()) > 1 else np.nan,
+                ),
+                region_coverage_fraction_mean=("region_coverage_fraction", "mean"),
+                verification_flags=("region_4plus_needs_verification", "sum"),
+            )
+            .reset_index()
+        )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        summary.to_csv(output_path, index=False)
+        print(f"Condition summary saved to: {output_path}")
+        return output_path
+
+    def _configure_plot_style(self):
+        import matplotlib.pyplot as plt
+
+        plt.rcParams.update(
+            {
+                "figure.dpi": 120,
+                "savefig.dpi": 300,
+                "axes.spines.top": False,
+                "axes.spines.right": False,
+                "axes.grid": True,
+                "grid.alpha": 0.25,
+                "legend.frameon": True,
+            }
+        )
+
+    @staticmethod
+    def _safe_filename(text: object) -> str:
+        return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(text)).strip("_")
+
     def calculate_wing_metrics(self) -> pd.DataFrame:
         df = self.get_dataframe().copy()
 
@@ -479,6 +561,7 @@ class HomerwingsDataAnalyzer:
     def plot_wing_area_binned_vs_temperature(self, output_dir: str | Path = "plots"):
         import matplotlib.pyplot as plt
 
+        self._configure_plot_style()
         output_dir = self._ensure_dir(output_dir)
 
         df = self.calculate_wing_metrics().copy()
@@ -549,6 +632,7 @@ class HomerwingsDataAnalyzer:
     def plot_wing_area_vs_avg_cell_area_per_condition(self, output_dir: str | Path = "plots"):
         import matplotlib.pyplot as plt
 
+        self._configure_plot_style()
         output_dir = self._ensure_dir(output_dir)
 
         df = self.calculate_wing_metrics().copy()
@@ -627,3 +711,112 @@ class HomerwingsDataAnalyzer:
         plt.savefig(out, dpi=300, bbox_inches="tight")
         plt.close()
         print(f"Saved: {out}")
+
+    def plot_size_relationships_with_fits(self, output_root: str | Path = "plots/size_relationships"):
+        import matplotlib.pyplot as plt
+
+        self._configure_plot_style()
+        output_root = self._ensure_dir(output_root)
+
+        df = self.calculate_wing_metrics().copy()
+        df["temperature_numeric"] = pd.to_numeric(df["temperature"], errors="coerce")
+        df = df.dropna(subset=["mutation", "sex", "temperature_numeric"])
+        if df.empty:
+            print("No data available for size relationship plots")
+            return
+
+        relationships = [
+            (
+                "wing_area_um2",
+                "wing_avg_cell_area",
+                "Wing Area (um^2)",
+                "Wing Average Cell Area (um^2)",
+                "cell_area_vs_wing_area",
+            ),
+            (
+                "wing_area_um2",
+                "total_estimated_cells",
+                "Wing Area (um^2)",
+                "Estimated Cell Number",
+                "cell_number_vs_wing_area",
+            ),
+            (
+                "wing_avg_cell_area",
+                "total_estimated_cells",
+                "Wing Average Cell Area (um^2)",
+                "Estimated Cell Number",
+                "cell_number_vs_cell_area",
+            ),
+        ]
+
+        for x_col, y_col, xlabel, ylabel, filename_base in relationships:
+            dfx = df.dropna(subset=[x_col, y_col]).copy()
+            if dfx.empty:
+                print(f"No data for {filename_base}")
+                continue
+
+            for temperature in sorted(dfx["temperature_numeric"].dropna().unique()):
+                sub_t = dfx[dfx["temperature_numeric"] == temperature].copy()
+                if sub_t.empty:
+                    continue
+
+                fig, ax = plt.subplots(figsize=(11, 7), constrained_layout=True)
+                mutations = sorted(sub_t["mutation"].dropna().unique())
+                cmap = plt.colormaps.get_cmap("tab20").resampled(max(1, len(mutations)))
+                mutation_colors = {mutation: cmap(i) for i, mutation in enumerate(mutations)}
+
+                for mutation in mutations:
+                    sub_m = sub_t[sub_t["mutation"] == mutation]
+                    if sub_m.empty:
+                        continue
+
+                    for sex in sorted(sub_m["sex"].dropna().unique()):
+                        sub_ms = sub_m[sub_m["sex"] == sex]
+                        marker = self._sex_marker(sex)
+                        color = mutation_colors[mutation]
+                        ax.scatter(
+                            sub_ms[x_col],
+                            sub_ms[y_col],
+                            alpha=0.7,
+                            s=52,
+                            marker=marker,
+                            color=color,
+                            edgecolors="white",
+                            linewidths=0.6,
+                            label=f"{mutation} - {sex}",
+                        )
+
+                        regression = self._regress_label(
+                            sub_ms[x_col].values,
+                            sub_ms[y_col].values,
+                            label_prefix=f"{mutation} - {sex}",
+                        )
+                        if regression is None:
+                            continue
+
+                        slope, intercept, _r2, label = regression
+                        x_min = np.nanmin(sub_ms[x_col].values)
+                        x_max = np.nanmax(sub_ms[x_col].values)
+                        if not np.isfinite(x_min) or not np.isfinite(x_max) or x_min == x_max:
+                            continue
+
+                        x_line = np.array([x_min, x_max], dtype=float)
+                        y_line = slope * x_line + intercept
+                        ax.plot(
+                            x_line,
+                            y_line,
+                            color=color,
+                            linewidth=2,
+                            linestyle="-" if str(sex) == "Male" else "--",
+                            label=label,
+                        )
+
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel(ylabel)
+                ax.set_title(f"{ylabel} vs {xlabel} at {temperature:g} C")
+                ax.legend(fontsize=7, loc="center left", bbox_to_anchor=(1.02, 0.5))
+
+                out = output_root / f"{filename_base}_{self._safe_filename(temperature)}C.png"
+                fig.savefig(out, bbox_inches="tight")
+                plt.close(fig)
+                print(f"Saved: {out}")

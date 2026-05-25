@@ -11,6 +11,9 @@ dependencies = [
     "seaborn>=0.13",
 ]
 
+[project.scripts]
+homerwings-plotting = "homerwings_plotting.cli:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
