@@ -29,6 +29,11 @@ OUTPUT_ROOT = None
 #   "none"  = CSVs + condition summary only
 PLOT_SUITE = "full"
 
+# Optional: point this at a previously generated condition_summary.csv/xlsx
+# to redraw the summary bar plots without transferring the full processed dataset.
+SUMMARY_SHEET = None
+SUMMARY_SHEET_NAME = 0
+
 
 def load_dependencies() -> None:
     global np, pd, stats
@@ -51,6 +56,233 @@ def load_dependencies() -> None:
     np = _np
     pd = _pd
     stats = _stats
+
+
+def configure_plot_style():
+    import matplotlib.pyplot as plt
+
+    plt.rcParams.update(
+        {
+            "figure.dpi": 120,
+            "savefig.dpi": 300,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.grid": True,
+            "grid.alpha": 0.25,
+            "legend.frameon": True,
+        }
+    )
+
+
+def safe_filename(text: object) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(text)).strip("_")
+
+
+def read_summary_sheet(summary_path: str | Path, sheet_name=0):
+    load_dependencies()
+
+    summary_path = Path(summary_path)
+    suffix = summary_path.suffix.lower()
+    if suffix == ".csv":
+        return pd.read_csv(summary_path)
+    if suffix in {".xlsx", ".xls"}:
+        return pd.read_excel(summary_path, sheet_name=sheet_name)
+    raise ValueError(
+        f"Unsupported summary sheet format: {summary_path.suffix}. "
+        "Use a .csv, .xlsx, or .xls file."
+    )
+
+
+def plot_mutation_temperature_barplots_from_summary(
+    summary_path: str | Path,
+    output_root: str | Path | None = None,
+    sheet_name=0,
+) -> Path:
+    import matplotlib.pyplot as plt
+
+    load_dependencies()
+    configure_plot_style()
+
+    summary_path = Path(summary_path)
+    summary_df = read_summary_sheet(summary_path, sheet_name=sheet_name).copy()
+
+    required_columns = {
+        "mutation",
+        "temperature",
+        "sex",
+        "n",
+        "wing_area_mean",
+        "wing_area_sem",
+        "wing_avg_cell_area_mean",
+        "wing_avg_cell_area_sem",
+        "total_estimated_cells_mean",
+        "total_estimated_cells_sem",
+    }
+    missing = sorted(required_columns - set(summary_df.columns))
+    if missing:
+        raise ValueError(
+            "Summary sheet is missing columns needed for plotting: "
+            + ", ".join(missing)
+        )
+
+    if output_root is None:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_root = summary_path.parent / "Summary_Sheet_Barplot_Output" / stamp
+    output_root = Path(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    summary_df["temperature_numeric"] = pd.to_numeric(summary_df["temperature"], errors="coerce")
+    summary_df = summary_df.dropna(subset=["mutation", "sex", "temperature_numeric"])
+    if summary_df.empty:
+        print("No usable rows found in summary sheet.")
+        return output_root
+
+    metrics = [
+        (
+            "wing_avg_cell_area_mean",
+            "wing_avg_cell_area_sem",
+            "Average Cell Area (um^2)",
+            "average_cell_area_temperature_sex_bars",
+        ),
+        (
+            "total_estimated_cells_mean",
+            "total_estimated_cells_sem",
+            "Estimated Cell Number",
+            "cell_number_temperature_sex_bars",
+        ),
+        (
+            "wing_area_mean",
+            "wing_area_sem",
+            "Wing Area (um^2)",
+            "wing_area_temperature_sex_bars",
+        ),
+    ]
+
+    sex_colors = {
+        "Male": "#2563eb",
+        "Female": "#dc2626",
+    }
+    fallback_colors = ["#16a34a", "#9333ea", "#ea580c", "#0891b2"]
+
+    for mutation in sorted(summary_df["mutation"].dropna().unique()):
+        df_mutation = summary_df[summary_df["mutation"] == mutation].copy()
+        mutation_dir = output_root / safe_filename(mutation)
+        mutation_dir.mkdir(parents=True, exist_ok=True)
+
+        temperatures = sorted(df_mutation["temperature_numeric"].dropna().unique())
+        sexes_seen = sorted(df_mutation["sex"].dropna().unique())
+        sex_order = [sex for sex in ["Male", "Female"] if sex in sexes_seen]
+        sex_order.extend([sex for sex in sexes_seen if sex not in sex_order])
+        if not temperatures or not sex_order:
+            continue
+
+        for mean_col, sem_col, ylabel, filename_base in metrics:
+            df_metric = df_mutation.dropna(subset=[mean_col]).copy()
+            if df_metric.empty:
+                print(f"No summary data for {mutation}: {filename_base}")
+                continue
+
+            x_centers = np.arange(len(temperatures), dtype=float)
+            bar_width = 0.36 if len(sex_order) <= 2 else min(0.75 / len(sex_order), 0.28)
+            offsets = (np.arange(len(sex_order)) - (len(sex_order) - 1) / 2) * bar_width
+
+            fig, ax = plt.subplots(figsize=(max(8, len(temperatures) * 2.2), 6.8))
+            y_tops = []
+
+            for sex_index, sex in enumerate(sex_order):
+                means = []
+                sems = []
+                counts = []
+
+                for temperature in temperatures:
+                    row = df_metric[
+                        (df_metric["temperature_numeric"] == temperature)
+                        & (df_metric["sex"] == sex)
+                    ]
+                    if row.empty:
+                        means.append(np.nan)
+                        sems.append(np.nan)
+                        counts.append(0)
+                        continue
+
+                    means.append(float(row[mean_col].iloc[0]))
+                    sem_value = row[sem_col].iloc[0]
+                    sems.append(0 if pd.isna(sem_value) else float(sem_value))
+                    counts.append(int(row["n"].iloc[0]) if not pd.isna(row["n"].iloc[0]) else 0)
+
+                x_positions = x_centers + offsets[sex_index]
+                color = sex_colors.get(str(sex), fallback_colors[sex_index % len(fallback_colors)])
+                ax.bar(
+                    x_positions,
+                    means,
+                    width=bar_width * 0.92,
+                    yerr=sems,
+                    capsize=4,
+                    color=color,
+                    alpha=0.82,
+                    edgecolor="black",
+                    linewidth=0.8,
+                    label=str(sex),
+                )
+
+                for x_pos, mean, sem, count in zip(x_positions, means, sems, counts):
+                    if pd.isna(mean):
+                        continue
+                    y_tops.append(mean + sem)
+                    ax.text(
+                        x_pos,
+                        0,
+                        f"n={count}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=7,
+                        rotation=90,
+                        color="white",
+                    )
+
+            y_max = max(y_tops) if y_tops else 1.0
+            y_min = min(0, float(df_metric[mean_col].min()))
+            y_range = y_max - y_min
+            if y_range <= 0:
+                y_range = abs(y_max) * 0.2 if y_max != 0 else 1.0
+
+            ax.set_xticks(x_centers)
+            ax.set_xticklabels([f"{temperature:g} C" for temperature in temperatures])
+            ax.set_ylabel(ylabel)
+            ax.set_xlabel("Temperature")
+            ax.set_title(
+                f"{mutation}: {ylabel} by Temperature and Sex\n"
+                "Summary-sheet mode: bars = mean +/- SEM; significance brackets unavailable"
+            )
+            ax.legend(title="Sex")
+            ax.set_ylim(y_min, y_max + y_range * 0.18)
+            ax.grid(True, axis="y", alpha=0.25)
+            ax.grid(False, axis="x")
+
+            out = mutation_dir / f"{filename_base}_{safe_filename(mutation)}.png"
+            fig.tight_layout()
+            fig.savefig(out, dpi=300, bbox_inches="tight")
+            plt.close(fig)
+            print(f"Saved: {out}")
+
+    manifest_path = output_root / "SUMMARY_SHEET_RUN.md"
+    manifest_path.write_text(
+        "\n".join(
+            [
+                "# HomerWings Summary-Sheet Plot Run",
+                "",
+                f"- Summary sheet: `{summary_path}`",
+                f"- Output folder: `{output_root}`",
+                "",
+                "Generated `Mutation_Temperature_Barplots/`-style plots from summary means and SEMs.",
+                "Significance brackets are not generated in summary-sheet mode because raw per-wing values are not present.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"Summary-sheet run manifest saved to: {manifest_path}")
+    return output_root
 
 
 class HomerwingsDataAnalyzer:
@@ -496,23 +728,11 @@ class HomerwingsDataAnalyzer:
         return output_path
 
     def _configure_plot_style(self):
-        import matplotlib.pyplot as plt
-
-        plt.rcParams.update(
-            {
-                "figure.dpi": 120,
-                "savefig.dpi": 300,
-                "axes.spines.top": False,
-                "axes.spines.right": False,
-                "axes.grid": True,
-                "grid.alpha": 0.25,
-                "legend.frameon": True,
-            }
-        )
+        configure_plot_style()
 
     @staticmethod
     def _safe_filename(text: object) -> str:
-        return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(text)).strip("_")
+        return safe_filename(text)
 
     def calculate_wing_metrics(self) -> pd.DataFrame:
         df = self.get_dataframe().copy()
@@ -1284,6 +1504,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional output folder. Defaults to OUTPUT_ROOT in this file.",
     )
     parser.add_argument(
+        "--summary-sheet",
+        default=SUMMARY_SHEET,
+        help=(
+            "Optional condition_summary.csv/xlsx input. "
+            "When provided, redraws summary bar plots without the full processed dataset."
+        ),
+    )
+    parser.add_argument(
         "--plots",
         choices=["none", "basic", "full"],
         default=PLOT_SUITE,
@@ -1300,6 +1528,14 @@ def build_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     args = build_parser().parse_args()
     selected_plot_suite = "none" if args.data_only else args.plots
+
+    if args.summary_sheet:
+        plot_mutation_temperature_barplots_from_summary(
+            summary_path=args.summary_sheet,
+            output_root=args.output,
+            sheet_name=SUMMARY_SHEET_NAME,
+        )
+        raise SystemExit(0)
 
     if not args.master_folder or args.master_folder == r"C:\path\to\Oregon_Results":
         raise SystemExit(

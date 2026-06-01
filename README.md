@@ -54,6 +54,20 @@ To make only the two lighter starter plots:
 python HomerWings_Plotting.py "C:\path\to\Oregon_Results" --plots basic
 ```
 
+To redraw the mutation temperature barplots from an existing summary file, without transferring the full processed dataset:
+
+```powershell
+python HomerWings_Plotting.py --summary-sheet "C:\path\to\condition_summary.csv"
+```
+
+You can also point it at an Excel file:
+
+```powershell
+python HomerWings_Plotting.py --summary-sheet "C:\path\to\condition_summary.xlsx"
+```
+
+Summary-sheet mode uses the saved means and SEMs, so it can redraw the bar charts but cannot calculate significance brackets. Those brackets require the original per-wing values.
+
 ## Expected Input Layout
 
 Each condition folder should be named:
@@ -88,3 +102,4 @@ Typical outputs:
 - `plots/`: generated figures when plots are enabled.
 - `Temp_Individual_Histograms/`: per-temperature multipanel histograms, one panel per mutation with male/female overlaid.
 - `Mutation_Temperature_Barplots/`: per-mutation bar charts for cell area, cell number, and wing area across temperatures with significant-only brackets.
+- `Summary_Sheet_Barplot_Output/`: optional output when redrawing mutation temperature barplots from `condition_summary.csv`/`.xlsx`.
