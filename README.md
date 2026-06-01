@@ -66,7 +66,7 @@ You can also point it at an Excel file:
 python HomerWings_Plotting.py --summary-sheet "C:\path\to\condition_summary.xlsx"
 ```
 
-Summary-sheet mode uses the saved means and SEMs, so it can redraw the bar charts but cannot calculate significance brackets. Those brackets require the original per-wing values.
+Summary-sheet mode uses the saved means, SEMs, and sample sizes to redraw the bar charts and estimate Welch-style significance brackets. This is very close to the raw-data calculation when the SEMs were generated from the same per-wing values, but the raw-data mode remains the most direct version.
 
 ## Expected Input Layout
 

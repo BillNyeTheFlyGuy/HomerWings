@@ -98,6 +98,7 @@ def plot_mutation_temperature_barplots_from_summary(
     output_root: str | Path | None = None,
     sheet_name=0,
 ) -> Path:
+    from itertools import combinations
     import matplotlib.pyplot as plt
 
     load_dependencies()
@@ -164,6 +165,55 @@ def plot_mutation_temperature_barplots_from_summary(
     }
     fallback_colors = ["#16a34a", "#9333ea", "#ea580c", "#0891b2"]
 
+    def _p_to_stars(p_value: float) -> str | None:
+        if not np.isfinite(p_value) or p_value >= 0.05:
+            return None
+        if p_value < 0.001:
+            return "***"
+        if p_value < 0.01:
+            return "**"
+        return "*"
+
+    def _summary_welch_p(group_a, group_b):
+        mean_a = float(group_a["mean"])
+        mean_b = float(group_b["mean"])
+        sem_a = float(group_a["sem"])
+        sem_b = float(group_b["sem"])
+        n_a = int(group_a["n"])
+        n_b = int(group_b["n"])
+
+        if n_a < 2 or n_b < 2:
+            return None
+        if not all(np.isfinite([mean_a, mean_b, sem_a, sem_b])):
+            return None
+
+        se_squared = sem_a**2 + sem_b**2
+        if se_squared <= 0:
+            return None
+
+        denominator = (sem_a**4 / (n_a - 1)) + (sem_b**4 / (n_b - 1))
+        if denominator <= 0:
+            return None
+
+        t_stat = (mean_a - mean_b) / np.sqrt(se_squared)
+        degrees_freedom = (se_squared**2) / denominator
+        if not np.isfinite(degrees_freedom) or degrees_freedom <= 0:
+            return None
+
+        return 2 * stats.t.sf(abs(t_stat), degrees_freedom)
+
+    def _add_sig_bracket(ax, x0, x1, y, height, label):
+        ax.plot([x0, x0, x1, x1], [y, y + height, y + height, y], color="black", linewidth=1.1)
+        ax.text(
+            (x0 + x1) / 2,
+            y + height,
+            label,
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            fontweight="bold",
+        )
+
     for mutation in sorted(summary_df["mutation"].dropna().unique()):
         df_mutation = summary_df[summary_df["mutation"] == mutation].copy()
         mutation_dir = output_root / safe_filename(mutation)
@@ -188,6 +238,7 @@ def plot_mutation_temperature_barplots_from_summary(
 
             fig, ax = plt.subplots(figsize=(max(8, len(temperatures) * 2.2), 6.8))
             y_tops = []
+            bar_lookup = {}
 
             for sex_index, sex in enumerate(sex_order):
                 means = []
@@ -225,10 +276,19 @@ def plot_mutation_temperature_barplots_from_summary(
                     label=str(sex),
                 )
 
-                for x_pos, mean, sem, count in zip(x_positions, means, sems, counts):
+                for temperature, x_pos, mean, sem, count in zip(
+                    temperatures, x_positions, means, sems, counts
+                ):
                     if pd.isna(mean):
                         continue
                     y_tops.append(mean + sem)
+                    bar_lookup[(temperature, sex)] = {
+                        "x": x_pos,
+                        "top": mean + sem,
+                        "mean": mean,
+                        "sem": sem,
+                        "n": count,
+                    }
                     ax.text(
                         x_pos,
                         0,
@@ -246,16 +306,56 @@ def plot_mutation_temperature_barplots_from_summary(
             if y_range <= 0:
                 y_range = abs(y_max) * 0.2 if y_max != 0 else 1.0
 
+            bracket_height = y_range * 0.035
+            bracket_gap = y_range * 0.075
+            next_bracket_y = y_max + bracket_gap
+
+            # Significant male/female comparisons within each temperature.
+            if "Male" in sex_order and "Female" in sex_order:
+                for temperature in temperatures:
+                    male = bar_lookup.get((temperature, "Male"))
+                    female = bar_lookup.get((temperature, "Female"))
+                    if male is None or female is None:
+                        continue
+                    p_value = _summary_welch_p(male, female)
+                    stars = _p_to_stars(p_value) if p_value is not None else None
+                    if stars is None:
+                        continue
+                    y = max(male["top"], female["top"]) + bracket_gap * 0.35
+                    _add_sig_bracket(ax, male["x"], female["x"], y, bracket_height, stars)
+                    next_bracket_y = max(next_bracket_y, y + bracket_gap)
+
+            # Significant temperature comparisons within each sex.
+            for sex in sex_order:
+                for temp_a, temp_b in combinations(temperatures, 2):
+                    group_a = bar_lookup.get((temp_a, sex))
+                    group_b = bar_lookup.get((temp_b, sex))
+                    if group_a is None or group_b is None:
+                        continue
+                    p_value = _summary_welch_p(group_a, group_b)
+                    stars = _p_to_stars(p_value) if p_value is not None else None
+                    if stars is None:
+                        continue
+                    _add_sig_bracket(
+                        ax,
+                        group_a["x"],
+                        group_b["x"],
+                        next_bracket_y,
+                        bracket_height,
+                        stars,
+                    )
+                    next_bracket_y += bracket_gap
+
             ax.set_xticks(x_centers)
             ax.set_xticklabels([f"{temperature:g} C" for temperature in temperatures])
             ax.set_ylabel(ylabel)
             ax.set_xlabel("Temperature")
             ax.set_title(
                 f"{mutation}: {ylabel} by Temperature and Sex\n"
-                "Summary-sheet mode: bars = mean +/- SEM; significance brackets unavailable"
+                "Summary-sheet mode: bars = mean +/- SEM; brackets from mean/SEM/n"
             )
             ax.legend(title="Sex")
-            ax.set_ylim(y_min, y_max + y_range * 0.18)
+            ax.set_ylim(y_min, next_bracket_y + bracket_gap)
             ax.grid(True, axis="y", alpha=0.25)
             ax.grid(False, axis="x")
 
@@ -275,7 +375,7 @@ def plot_mutation_temperature_barplots_from_summary(
                 f"- Output folder: `{output_root}`",
                 "",
                 "Generated `Mutation_Temperature_Barplots/`-style plots from summary means and SEMs.",
-                "Significance brackets are not generated in summary-sheet mode because raw per-wing values are not present.",
+                "Significance brackets are estimated from group means, SEMs, and sample sizes.",
             ]
         )
         + "\n",
