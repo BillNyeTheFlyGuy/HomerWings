@@ -452,6 +452,7 @@ class HomerwingsDataAnalyzer:
         if plot_suite != "none":
             lines.append("- `plots/`")
             lines.append("- `Temp_Individual_Histograms/`")
+            lines.append("- `Mutation_Temperature_Barplots/`")
 
         manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"Run summary saved to: {manifest_path}")
@@ -1000,6 +1001,230 @@ class HomerwingsDataAnalyzer:
                 plt.close(fig)
                 print(f"Saved: {out}")
 
+    def plot_mutation_temperature_barplots(
+        self,
+        output_root: str | Path = "Mutation_Temperature_Barplots",
+    ):
+        from itertools import combinations
+        import matplotlib.pyplot as plt
+
+        self._configure_plot_style()
+        output_root = self._ensure_dir(output_root)
+
+        df = self.calculate_wing_metrics().copy()
+        df["temperature_numeric"] = pd.to_numeric(df["temperature"], errors="coerce")
+        df = df.dropna(subset=["mutation", "sex", "temperature_numeric"])
+        if df.empty:
+            print("No data available for mutation temperature barplots")
+            return
+
+        metrics = [
+            (
+                "wing_avg_cell_area",
+                "Average Cell Area (um^2)",
+                "average_cell_area_temperature_sex_bars",
+            ),
+            (
+                "total_estimated_cells",
+                "Estimated Cell Number",
+                "cell_number_temperature_sex_bars",
+            ),
+            (
+                "wing_area_um2",
+                "Wing Area (um^2)",
+                "wing_area_temperature_sex_bars",
+            ),
+        ]
+
+        sex_colors = {
+            "Male": "#2563eb",
+            "Female": "#dc2626",
+        }
+        fallback_colors = ["#16a34a", "#9333ea", "#ea580c", "#0891b2"]
+
+        def _p_to_stars(p_value: float) -> str | None:
+            if not np.isfinite(p_value) or p_value >= 0.05:
+                return None
+            if p_value < 0.001:
+                return "***"
+            if p_value < 0.01:
+                return "**"
+            return "*"
+
+        def _welch_p(values_a, values_b):
+            values_a = pd.Series(values_a).dropna()
+            values_b = pd.Series(values_b).dropna()
+            if len(values_a) < 2 or len(values_b) < 2:
+                return None
+            _stat, p_value = stats.ttest_ind(values_a, values_b, equal_var=False, nan_policy="omit")
+            return p_value
+
+        def _add_sig_bracket(ax, x0, x1, y, height, label):
+            ax.plot([x0, x0, x1, x1], [y, y + height, y + height, y], color="black", linewidth=1.1)
+            ax.text(
+                (x0 + x1) / 2,
+                y + height,
+                label,
+                ha="center",
+                va="bottom",
+                fontsize=10,
+                fontweight="bold",
+            )
+
+        for mutation in sorted(df["mutation"].dropna().unique()):
+            df_mutation = df[df["mutation"] == mutation].copy()
+            if df_mutation.empty:
+                continue
+
+            mutation_dir = self._ensure_dir(output_root / self._safe_filename(mutation))
+            temperatures = sorted(df_mutation["temperature_numeric"].dropna().unique())
+            if not temperatures:
+                continue
+
+            sexes_seen = sorted(df_mutation["sex"].dropna().unique())
+            sex_order = [sex for sex in ["Male", "Female"] if sex in sexes_seen]
+            sex_order.extend([sex for sex in sexes_seen if sex not in sex_order])
+            if not sex_order:
+                continue
+
+            for metric_col, ylabel, filename_base in metrics:
+                df_metric = df_mutation.dropna(subset=[metric_col]).copy()
+                if df_metric.empty:
+                    print(f"No data for {mutation}: {filename_base}")
+                    continue
+
+                x_centers = np.arange(len(temperatures), dtype=float)
+                bar_width = 0.36 if len(sex_order) <= 2 else min(0.75 / len(sex_order), 0.28)
+                offsets = (np.arange(len(sex_order)) - (len(sex_order) - 1) / 2) * bar_width
+
+                fig, ax = plt.subplots(figsize=(max(8, len(temperatures) * 2.2), 6.8))
+                bar_lookup = {}
+                y_tops = []
+
+                for sex_index, sex in enumerate(sex_order):
+                    means = []
+                    sems = []
+                    counts = []
+                    for temperature in temperatures:
+                        values = df_metric[
+                            (df_metric["temperature_numeric"] == temperature)
+                            & (df_metric["sex"] == sex)
+                        ][metric_col].dropna()
+                        counts.append(len(values))
+                        means.append(values.mean() if len(values) else np.nan)
+                        sems.append(
+                            stats.sem(values, nan_policy="omit") if len(values) > 1 else np.nan
+                        )
+
+                    x_positions = x_centers + offsets[sex_index]
+                    color = sex_colors.get(
+                        str(sex),
+                        fallback_colors[sex_index % len(fallback_colors)],
+                    )
+                    yerr = [0 if pd.isna(value) else value for value in sems]
+                    ax.bar(
+                        x_positions,
+                        means,
+                        width=bar_width * 0.92,
+                        yerr=yerr,
+                        capsize=4,
+                        color=color,
+                        alpha=0.82,
+                        edgecolor="black",
+                        linewidth=0.8,
+                        label=str(sex),
+                    )
+
+                    for temperature, x_pos, mean, sem, count in zip(
+                        temperatures, x_positions, means, sems, counts
+                    ):
+                        if pd.isna(mean):
+                            continue
+                        err = 0 if pd.isna(sem) else sem
+                        y_tops.append(mean + err)
+                        bar_lookup[(temperature, sex)] = {
+                            "x": x_pos,
+                            "top": mean + err,
+                            "values": df_metric[
+                                (df_metric["temperature_numeric"] == temperature)
+                                & (df_metric["sex"] == sex)
+                            ][metric_col].dropna(),
+                        }
+                        ax.text(
+                            x_pos,
+                            0,
+                            f"n={count}",
+                            ha="center",
+                            va="bottom",
+                            fontsize=7,
+                            rotation=90,
+                            color="white",
+                        )
+
+                y_max = max(y_tops) if y_tops else 1.0
+                y_min = min(0, float(df_metric[metric_col].min()))
+                y_range = y_max - y_min
+                if y_range <= 0:
+                    y_range = abs(y_max) * 0.2 if y_max != 0 else 1.0
+                bracket_height = y_range * 0.035
+                bracket_gap = y_range * 0.075
+                next_bracket_y = y_max + bracket_gap
+
+                # Significant male/female comparisons within each temperature.
+                if "Male" in sex_order and "Female" in sex_order:
+                    for temperature in temperatures:
+                        male = bar_lookup.get((temperature, "Male"))
+                        female = bar_lookup.get((temperature, "Female"))
+                        if male is None or female is None:
+                            continue
+                        p_value = _welch_p(male["values"], female["values"])
+                        stars = _p_to_stars(p_value) if p_value is not None else None
+                        if stars is None:
+                            continue
+                        y = max(male["top"], female["top"]) + bracket_gap * 0.35
+                        _add_sig_bracket(ax, male["x"], female["x"], y, bracket_height, stars)
+                        next_bracket_y = max(next_bracket_y, y + bracket_gap)
+
+                # Significant temperature comparisons within each sex.
+                for sex in sex_order:
+                    for temp_a, temp_b in combinations(temperatures, 2):
+                        group_a = bar_lookup.get((temp_a, sex))
+                        group_b = bar_lookup.get((temp_b, sex))
+                        if group_a is None or group_b is None:
+                            continue
+                        p_value = _welch_p(group_a["values"], group_b["values"])
+                        stars = _p_to_stars(p_value) if p_value is not None else None
+                        if stars is None:
+                            continue
+                        _add_sig_bracket(
+                            ax,
+                            group_a["x"],
+                            group_b["x"],
+                            next_bracket_y,
+                            bracket_height,
+                            stars,
+                        )
+                        next_bracket_y += bracket_gap
+
+                ax.set_xticks(x_centers)
+                ax.set_xticklabels([f"{temperature:g} C" for temperature in temperatures])
+                ax.set_ylabel(ylabel)
+                ax.set_xlabel("Temperature")
+                ax.set_title(
+                    f"{mutation}: {ylabel} by Temperature and Sex\n"
+                    "Bars = mean +/- SEM; brackets show significant comparisons only"
+                )
+                ax.legend(title="Sex")
+                ax.set_ylim(y_min, next_bracket_y + bracket_gap)
+                ax.grid(True, axis="y", alpha=0.25)
+                ax.grid(False, axis="x")
+
+                out = mutation_dir / f"{filename_base}_{self._safe_filename(mutation)}.png"
+                fig.tight_layout()
+                fig.savefig(out, dpi=300, bbox_inches="tight")
+                plt.close(fig)
+                print(f"Saved: {out}")
+
 
 def run_analysis(
     master_folder: str | Path,
@@ -1028,6 +1253,9 @@ def run_analysis(
             analyzer.plot_size_relationships_with_fits(output_root=plots_root / "size_relationships")
             analyzer.plot_temp_individual_histograms(
                 output_root=analyzer.output_root / "Temp_Individual_Histograms"
+            )
+            analyzer.plot_mutation_temperature_barplots(
+                output_root=analyzer.output_root / "Mutation_Temperature_Barplots"
             )
     else:
         print("Plot generation skipped.")

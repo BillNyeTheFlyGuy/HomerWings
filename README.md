@@ -87,3 +87,4 @@ Typical outputs:
 - `RUN_SUMMARY.md`: short manifest for the run.
 - `plots/`: generated figures when plots are enabled.
 - `Temp_Individual_Histograms/`: per-temperature multipanel histograms, one panel per mutation with male/female overlaid.
+- `Mutation_Temperature_Barplots/`: per-mutation bar charts for cell area, cell number, and wing area across temperatures with significant-only brackets.
